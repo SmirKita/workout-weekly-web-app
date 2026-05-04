@@ -128,7 +128,7 @@ button {
 main {
   width: min(1180px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 22px 0 64px;
+  padding: 22px 0 112px;
 }
 
 .toolbar,
@@ -173,7 +173,7 @@ main {
   background: #fff;
   color: var(--ink);
   padding: 9px 14px;
-  min-height: 40px;
+  min-height: 44px;
 }
 
 .pill.is-active,
@@ -303,6 +303,19 @@ p {
   font-weight: 700;
 }
 
+.quick-mode,
+.complete-day,
+.mini-check {
+  min-height: 44px;
+}
+
+.mini-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+}
+
 .search-row {
   margin: 16px 0 14px;
 }
@@ -348,10 +361,9 @@ p {
 
 .mini-check input,
 .complete-day input,
-.done-line input,
 .quick-mode input {
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   accent-color: var(--green);
 }
 
@@ -470,6 +482,116 @@ p {
   font-weight: 900;
 }
 
+.progress-card,
+.day-progress {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.progress-card {
+  padding: 16px;
+  margin: 0 0 16px;
+  box-shadow: var(--shadow);
+}
+
+.day-progress {
+  padding: 10px;
+  margin: 12px 0;
+  box-shadow: none;
+}
+
+.progress-total {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  font-weight: 900;
+}
+
+.progress-total span {
+  color: var(--muted);
+}
+
+.progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #e8ede5;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--green);
+  transition: width 180ms ease;
+}
+
+.progress-segments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.progress-segment {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfcfa;
+}
+
+.progress-segment > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 900;
+}
+
+.progress-segment small {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.progress-segment.is-done {
+  border-color: rgba(47, 125, 92, 0.45);
+  background: #eef7f1;
+}
+
+.progress-segment.is-active .progress-bar span {
+  background: var(--orange);
+}
+
+.progress-segment.is-empty .progress-bar span {
+  background: transparent;
+}
+
+.day-progress .progress-segments {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.day-progress .progress-segment {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.day-progress .progress-segment > div:first-child,
+.day-progress .progress-segment small {
+  display: none;
+}
+
+.day-progress .progress-bar {
+  height: 5px;
+  margin-top: 0;
+}
+
 .notes-box textarea {
   width: 100%;
   min-height: 108px;
@@ -546,20 +668,52 @@ p {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #fbfcfa;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, opacity 160ms ease;
+}
+
+.routine-item.is-done {
+  border-color: rgba(47, 125, 92, 0.48);
+  background: #eef7f1;
+}
+
+.routine-item.is-done p:not(.routine-amount) {
+  opacity: 0.72;
 }
 
 .routine-check {
-  display: grid;
-  justify-items: center;
-  gap: 6px;
-  color: var(--muted);
+  min-width: 92px;
+  min-height: 44px;
+  align-self: start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
   font-weight: 900;
+  padding: 8px 10px;
 }
 
-.routine-check input {
-  width: 18px;
-  height: 18px;
-  accent-color: var(--green);
+.routine-check[aria-pressed="true"] {
+  border-color: transparent;
+  background: var(--green);
+  color: #fff;
+}
+
+.routine-check__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(47, 125, 92, 0.12);
+}
+
+.routine-check[aria-pressed="true"] .routine-check__icon {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .routine-item h3 {
@@ -617,16 +771,63 @@ p {
 .exercise-card {
   position: relative;
   overflow: hidden;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.exercise-card:focus-visible,
+.routine-item:focus-visible {
+  outline: 3px solid rgba(49, 108, 159, 0.3);
+  outline-offset: 3px;
+}
+
+.exercise-card.is-done {
+  border-color: rgba(47, 125, 92, 0.55);
+  background: #f1f8f3;
+}
+
+.exercise-card.is-done .summary,
+.exercise-card.is-done .muscles,
+.exercise-card.is-done details p {
+  opacity: 0.72;
 }
 
 .done-line {
   position: absolute;
   z-index: 2;
-  right: 10px;
-  top: 10px;
-  padding: 7px 10px;
+  right: 12px;
+  top: 12px;
+  min-height: 44px;
+  min-width: 122px;
+  padding: 9px 13px;
+  border: 1px solid var(--line);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 900;
+}
+
+.done-line[aria-pressed="true"] {
+  border-color: transparent;
+  background: var(--green);
+  color: #fff;
+}
+
+.done-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(47, 125, 92, 0.12);
+}
+
+.done-line[aria-pressed="true"] .done-icon {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .media-wrap {
@@ -682,7 +883,7 @@ p {
 }
 
 .exercise-card.is-quick .exercise-card__body {
-  padding-top: 54px;
+  padding-top: 64px;
 }
 
 .exercise-card.is-quick .metrics {
@@ -815,11 +1016,27 @@ details p {
 
 @media (max-width: 720px) {
   .hero {
-    min-height: 430px;
+    min-height: 330px;
   }
 
   .topbar {
     justify-content: flex-start;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .topbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hero__content {
+    padding: 34px 0 46px;
+  }
+
+  .hero p:not(.eyebrow) {
+    font-size: 16px;
   }
 
   .toolbar,
@@ -828,6 +1045,27 @@ details p {
   .exercise-heading {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .toolbar {
+    position: static;
+    margin-top: -20px;
+  }
+
+  .day-pills {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .day-pills::-webkit-scrollbar {
+    display: none;
+  }
+
+  .pill {
+    min-width: 52px;
   }
 
   .week-grid,
@@ -843,8 +1081,40 @@ details p {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .progress-segments {
+    grid-template-columns: 1fr;
+  }
+
+  .day-progress .progress-segments {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .routine-section summary {
+    align-items: flex-start;
+  }
+
+  .routine-section summary,
+  .routine-item {
+    padding: 14px;
+  }
+
+  .routine-item {
+    grid-template-columns: 1fr;
+  }
+
+  .routine-check {
+    width: 100%;
+    justify-content: center;
+  }
+
   .complete-day {
     white-space: normal;
+  }
+
+  .scroll-top {
+    right: 14px;
+    bottom: max(14px, env(safe-area-inset-bottom));
+    min-width: 96px;
   }
 }
 
@@ -856,10 +1126,36 @@ details p {
   }
 
   .hero h1 {
-    font-size: 40px;
+    font-size: 38px;
   }
 
   .metrics {
     grid-template-columns: 1fr;
+  }
+
+  .panel,
+  .day-hero,
+  .notes-box,
+  .info-card,
+  .progress-card {
+    padding: 14px;
+  }
+
+  .exercise-card__body {
+    padding: 14px;
+  }
+
+  .exercise-card h3 {
+    font-size: 22px;
+  }
+
+  .done-line {
+    right: 10px;
+    top: 10px;
+    min-width: 112px;
+  }
+
+  .media-wrap {
+    aspect-ratio: 16 / 9;
   }
 }

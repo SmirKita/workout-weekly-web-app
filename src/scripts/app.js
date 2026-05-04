@@ -32,6 +32,12 @@ const metricHelp = {
   Отдых: "Пауза между подходами перед следующим рабочим подходом.",
 };
 
+const groupLabels = {
+  prep: "Подготовка",
+  main: "Основная часть",
+  finish: "Завершение",
+};
+
 function loadSaved() {
   try {
     return JSON.parse(localStorage.getItem(storageKey)) || {
@@ -59,6 +65,102 @@ function normalize(value) {
 
 function assetPath(path) {
   return `${baseUrl}${path.replace(/^\/+/, "")}`;
+}
+
+function completionItems(day) {
+  const routineItems = (day.sections || []).flatMap((section) =>
+    section.items.map((item, index) => ({
+      key: `${section.id}:${index}`,
+      group: item.section || section.group || "main",
+    })),
+  );
+  const exerciseItems = day.exercises.map((exercise) => ({
+    key: exercise.id,
+    group: exercise.section || "main",
+  }));
+  return [...routineItems, ...exerciseItems];
+}
+
+function progressForDay(day) {
+  const groups = Object.fromEntries(
+    Object.entries(groupLabels).map(([key, label]) => [key, { key, label, done: 0, total: 0 }]),
+  );
+  const items = completionItems(day);
+
+  items.forEach((item) => {
+    const group = groups[item.group] || groups.main;
+    group.total += 1;
+    if (saved.exercises[item.key]) group.done += 1;
+  });
+
+  const done = items.filter((item) => saved.exercises[item.key]).length;
+  return {
+    done,
+    total: items.length,
+    groups: Object.values(groups),
+  };
+}
+
+function percent(done, total) {
+  return total ? Math.round((done / total) * 100) : 0;
+}
+
+function statusLabel(done, total) {
+  if (!total || done === 0) return "Не начато";
+  if (done === total) return "Готово";
+  return "В процессе";
+}
+
+function progressMarkup(day, compact = false) {
+  const progress = progressForDay(day);
+  const totalPercent = percent(progress.done, progress.total);
+  return `
+    <div class="progress-total">
+      <span>${compact ? "Прогресс" : "Общий прогресс"}</span>
+      <strong>${progress.done}/${progress.total}</strong>
+    </div>
+    <div class="progress-bar" aria-hidden="true"><span style="width: ${totalPercent}%"></span></div>
+    <div class="progress-segments">
+      ${progress.groups.map((group) => {
+        const groupPercent = percent(group.done, group.total);
+        return `
+          <div class="progress-segment is-${groupPercent === 0 ? "empty" : groupPercent === 100 ? "done" : "active"}">
+            <div>
+              <span>${group.label}</span>
+              <strong>${group.done}/${group.total}</strong>
+            </div>
+            <div class="progress-bar" aria-hidden="true"><span style="width: ${groupPercent}%"></span></div>
+            <small>${groupPercent}% · ${statusLabel(group.done, group.total)}</small>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function updateProgressViews() {
+  const day = workouts.find((item) => item.id === state.activeDayId);
+  if (!day) return;
+
+  const activeProgress = els.dayDetails.querySelector("#trainingProgress");
+  if (activeProgress) activeProgress.innerHTML = progressMarkup(day);
+
+  document.querySelectorAll("[data-day-progress]").forEach((node) => {
+    const progressDay = workouts.find((item) => item.id === node.dataset.dayProgress);
+    if (progressDay) node.innerHTML = progressMarkup(progressDay, true);
+  });
+}
+
+function setCompletion(key, done) {
+  saved.exercises[key] = done;
+  persist();
+  updateProgressViews();
+}
+
+function shouldIgnoreToggle(event) {
+  if (window.getSelection?.().toString()) return true;
+  if (!(event.target instanceof Element)) return false;
+  return Boolean(event.target.closest("button, input, textarea, select, a, details, summary, label"));
 }
 
 els.hero?.style.setProperty("--hero-image", `url("${assetPath("assets/hero/workout-hero.png")}")`);
@@ -164,15 +266,17 @@ function renderWeek() {
       <p class="day-type">${day.type}</p>
       <p class="day-summary">${day.summary}</p>
       <p class="duration">${day.duration}</p>
+      <div class="day-progress" data-day-progress="${day.id}">${progressMarkup(day, true)}</div>
       <div class="tags">${day.tags.map((tag) => `<span>${tag}</span>`).join("")}</div>
     `;
     card.addEventListener("click", (event) => {
-      if (event.target.matches("input")) return;
+      if (event.target instanceof Element && event.target.closest(".mini-check")) return;
       selectDay(day.id);
     });
     card.addEventListener("keydown", (event) => {
       if (event.key === "Enter") selectDay(day.id);
     });
+    card.querySelector("input").addEventListener("click", (event) => event.stopPropagation());
     card.querySelector("input").addEventListener("change", (event) => {
       saved.days[day.id] = event.target.checked;
       persist();
@@ -238,6 +342,10 @@ function renderDayDetails() {
 
     <div class="day-counts">${counts.map((item) => `<span>${item}</span>`).join("")}</div>
 
+    <section class="progress-card" id="trainingProgress" aria-label="Прогресс тренировки">
+      ${progressMarkup(day)}
+    </section>
+
     <div class="notes-box">
       <label for="dayNotes">Заметки после тренировки</label>
       <textarea id="dayNotes" placeholder="Вес, повторы, самочувствие, что было сложно...">${saved.notes[day.id] || ""}</textarea>
@@ -256,6 +364,7 @@ function renderDayDetails() {
     saved.notes[day.id] = event.target.value;
     persist();
   });
+  els.dayDetails.querySelector("#dayNotes").addEventListener("click", (event) => event.stopPropagation());
 
   const flow = els.dayDetails.querySelector(".training-flow");
   preSections.forEach((section) => flow.append(renderRoutineSection(section)));
@@ -331,13 +440,16 @@ function renderRoutineSection(section) {
   const list = node.querySelector(".routine-list");
   section.items.forEach((item, index) => {
     const key = `${section.id}:${index}`;
+    const isDone = Boolean(saved.exercises[key]);
     const row = document.createElement("article");
-    row.className = "routine-item";
+    row.className = `routine-item ${isDone ? "is-done" : ""}`;
+    row.role = "button";
+    row.tabIndex = 0;
     row.innerHTML = `
-      <label class="routine-check">
-        <input type="checkbox" ${saved.exercises[key] ? "checked" : ""} />
-        <span>${index + 1}</span>
-      </label>
+      <button class="routine-check" type="button" aria-pressed="${isDone}">
+        <span class="routine-check__icon" aria-hidden="true">${isDone ? "✓" : index + 1}</span>
+        <span class="routine-check__text">${isDone ? "Готово" : "Отметить"}</span>
+      </button>
       <div>
         <h3>${item.title}</h3>
         <p class="routine-amount">${item.amount}</p>
@@ -348,9 +460,30 @@ function renderRoutineSection(section) {
         }
       </div>
     `;
-    row.querySelector("input").addEventListener("change", (event) => {
-      saved.exercises[key] = event.target.checked;
-      persist();
+    const applyRoutineState = (done) => {
+      const button = row.querySelector(".routine-check");
+      row.classList.toggle("is-done", done);
+      button.setAttribute("aria-pressed", String(done));
+      button.querySelector(".routine-check__icon").textContent = done ? "✓" : index + 1;
+      button.querySelector(".routine-check__text").textContent = done ? "Готово" : "Отметить";
+    };
+    const toggleRoutine = () => {
+      const done = !saved.exercises[key];
+      setCompletion(key, done);
+      applyRoutineState(done);
+    };
+    row.addEventListener("click", (event) => {
+      if (shouldIgnoreToggle(event)) return;
+      toggleRoutine();
+    });
+    row.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      toggleRoutine();
+    });
+    row.querySelector(".routine-check").addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleRoutine();
     });
     list.append(row);
   });
@@ -362,11 +495,32 @@ function renderExercise(item, order) {
   const template = document.querySelector("#exerciseTemplate");
   const node = template.content.firstElementChild.cloneNode(true);
   node.classList.toggle("is-quick", state.quickMode);
-  const checkbox = node.querySelector(".exercise-done");
-  checkbox.checked = Boolean(saved.exercises[item.id]);
-  checkbox.addEventListener("change", (event) => {
-    saved.exercises[item.id] = event.target.checked;
-    persist();
+  node.role = "button";
+  node.tabIndex = 0;
+  const doneButton = node.querySelector(".exercise-done");
+  const applyExerciseState = (done) => {
+    node.classList.toggle("is-done", done);
+    doneButton.setAttribute("aria-pressed", String(done));
+    doneButton.querySelector(".done-text").textContent = done ? "Сделано" : "Не сделано";
+  };
+  const toggleExercise = () => {
+    const done = !saved.exercises[item.id];
+    setCompletion(item.id, done);
+    applyExerciseState(done);
+  };
+  applyExerciseState(Boolean(saved.exercises[item.id]));
+  node.addEventListener("click", (event) => {
+    if (shouldIgnoreToggle(event)) return;
+    toggleExercise();
+  });
+  node.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    toggleExercise();
+  });
+  doneButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleExercise();
   });
 
   const media = node.querySelector(".media-wrap");
@@ -409,6 +563,8 @@ function renderExercise(item, order) {
       const detail = document.createElement("details");
       detail.open = index === 0;
       detail.innerHTML = `<summary>${title}</summary><p>${text}</p>`;
+      detail.addEventListener("click", (event) => event.stopPropagation());
+      detail.addEventListener("keydown", (event) => event.stopPropagation());
       details.append(detail);
     });
   }

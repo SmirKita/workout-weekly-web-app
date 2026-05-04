@@ -22,6 +22,7 @@ const exercise = ({
   id,
   title,
   image,
+  section = "main",
   sets = "По самочувствию",
   weight = "Легко или без веса",
   rpe = "RPE 4-6",
@@ -36,6 +37,7 @@ const exercise = ({
   id,
   title,
   image,
+  section,
   sets,
   weight,
   rpe,
@@ -55,10 +57,11 @@ const routineItem = ({ title, amount, technique, goal }) => ({
   goal,
 });
 
-const section = ({ id, title, kind, summary, tags = [], items = [] }) => ({
+const section = ({ id, title, kind, group = null, summary, tags = [], items = [] }) => ({
   id,
   title,
   kind,
+  group,
   summary,
   tags,
   items,
@@ -1420,8 +1423,25 @@ const mainExerciseIds = {
   sun: [],
 };
 
+const groupByKind = {
+  entry: "prep",
+  warmup: "prep",
+  technique: "prep",
+  recovery: "prep",
+  yoga: "main",
+  "pool-main": "main",
+  interval: "finish",
+  cooldown: "finish",
+};
+
 workouts.forEach((day) => {
   day.sections = routineSections[day.id] || [];
+  day.sections.forEach((section) => {
+    section.group = section.group || groupByKind[section.kind] || "main";
+    section.items.forEach((item) => {
+      item.section = section.group;
+    });
+  });
   const ids = mainExerciseIds[day.id] || day.exercises.map((item) => item.id);
   day.exercises = day.exercises.filter((item) => ids.includes(item.id));
 });

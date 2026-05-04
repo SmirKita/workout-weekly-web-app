@@ -141,10 +141,10 @@
 
     <template id="exerciseTemplate">
       <article class="exercise-card">
-        <label class="done-line">
-          <input class="exercise-done" type="checkbox" />
-          <span>Сделано</span>
-        </label>
+        <button class="done-line exercise-done" type="button" aria-pressed="false">
+          <span class="done-icon" aria-hidden="true">✓</span>
+          <span class="done-text">Не сделано</span>
+        </button>
         <div class="media-wrap"></div>
         <div class="exercise-card__body">
           <h3></h3>
