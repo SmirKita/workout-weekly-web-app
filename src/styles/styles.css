@@ -68,6 +68,11 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+}
+
+.mobile-label {
+  display: none;
 }
 
 .scroll-top {
@@ -1015,23 +1020,53 @@ details p {
 
 @media (max-width: 720px) {
   .hero {
-    min-height: 330px;
+    min-height: 310px;
   }
 
   .topbar {
+    width: 100%;
+    margin: 0;
+    padding: max(12px, env(safe-area-inset-top)) 16px 10px;
     justify-content: flex-start;
     flex-wrap: nowrap;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    gap: 8px;
+    scroll-padding-inline: 16px;
+    background: linear-gradient(180deg, rgba(17, 27, 26, 0.44), rgba(17, 27, 26, 0));
+    backdrop-filter: blur(6px);
   }
 
   .topbar::-webkit-scrollbar {
     display: none;
   }
 
+  .topbar a {
+    flex: 0 0 auto;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-size: 14px;
+    line-height: 1;
+    font-weight: 800;
+    white-space: nowrap;
+    scroll-snap-align: start;
+    background: rgba(255, 255, 255, 0.14);
+  }
+
+  .desktop-label {
+    display: none;
+  }
+
+  .mobile-label {
+    display: inline;
+  }
+
   .hero__content {
-    padding: 34px 0 46px;
+    padding: 24px 0 42px;
   }
 
   .hero p:not(.eyebrow) {
@@ -1054,9 +1089,10 @@ details p {
   .day-pills {
     flex-wrap: nowrap;
     overflow-x: auto;
-    padding-bottom: 2px;
+    padding: 0 8px 2px 0;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    scroll-padding-inline: 4px;
   }
 
   .day-pills::-webkit-scrollbar {
@@ -1119,8 +1155,7 @@ details p {
 
 @media (max-width: 430px) {
   main,
-  .hero__content,
-  .topbar {
+  .hero__content {
     width: min(100% - 20px, 1180px);
   }
 
