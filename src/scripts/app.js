@@ -81,6 +81,22 @@ function completionItems(day) {
   return [...routineItems, ...exerciseItems];
 }
 
+function isDayComplete(day) {
+  const items = completionItems(day);
+  return items.length > 0 && items.every((item) => saved.exercises[item.key]);
+}
+
+function syncDayCompletion(day) {
+  const complete = isDayComplete(day);
+  const changed = Boolean(saved.days[day.id]) !== complete;
+  saved.days[day.id] = complete;
+  return changed;
+}
+
+function syncAllDayCompletion() {
+  workouts.forEach(syncDayCompletion);
+}
+
 function progressForDay(day) {
   const groups = Object.fromEntries(
     Object.entries(groupLabels).map(([key, label]) => [key, { key, label, done: 0, total: 0 }]),
@@ -149,18 +165,63 @@ function updateProgressViews() {
     const progressDay = workouts.find((item) => item.id === node.dataset.dayProgress);
     if (progressDay) node.innerHTML = progressMarkup(progressDay, true);
   });
+
+  document.querySelectorAll("[data-day-done]").forEach((node) => {
+    const progressDay = workouts.find((item) => item.id === node.dataset.dayDone);
+    if (progressDay) node.checked = Boolean(saved.days[progressDay.id]);
+  });
 }
 
 function setCompletion(key, done) {
   saved.exercises[key] = done;
+  syncAllDayCompletion();
   persist();
   updateProgressViews();
+}
+
+function setDayCompletion(day, done) {
+  completionItems(day).forEach((item) => {
+    saved.exercises[item.key] = done;
+  });
+  syncDayCompletion(day);
+  persist();
+  render();
 }
 
 function shouldIgnoreToggle(event) {
   if (window.getSelection?.().toString()) return true;
   if (!(event.target instanceof Element)) return false;
   return Boolean(event.target.closest("button, input, textarea, select, a, details, summary, label"));
+}
+
+function metricValue(value) {
+  if (!value || typeof value !== "object") return value;
+  return [
+    value.start ? `<span><strong>Старт:</strong> ${value.start}</span>` : `<span><strong>Старт:</strong> уточнить</span>`,
+    value.range ? `<span><strong>Диапазон:</strong> ${value.range}</span>` : "",
+    value.hint ? `<span><strong>Подсказка:</strong> ${value.hint}</span>` : "",
+  ].filter(Boolean).join("");
+}
+
+function searchableValue(value) {
+  if (!value || typeof value !== "object") return value || "";
+  return [value.start, value.range, value.hint].filter(Boolean).join(" ");
+}
+
+function openTipSheet(title, text) {
+  const sheet = document.querySelector("#tipSheet");
+  if (!sheet) return;
+  sheet.querySelector(".tip-sheet__title").textContent = title;
+  sheet.querySelector(".tip-sheet__text").textContent = text;
+  sheet.classList.add("is-open");
+  sheet.setAttribute("aria-hidden", "false");
+}
+
+function closeTipSheet() {
+  const sheet = document.querySelector("#tipSheet");
+  if (!sheet) return;
+  sheet.classList.remove("is-open");
+  sheet.setAttribute("aria-hidden", "true");
 }
 
 els.hero?.style.setProperty("--hero-image", `url("${assetPath("assets/hero/workout-hero.png")}")`);
@@ -173,6 +234,24 @@ window.addEventListener("scroll", updateScrollTopButton, { passive: true });
 
 els.scrollTopButton?.addEventListener("click", () => {
   window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
+document.addEventListener("click", (event) => {
+  const tooltip = event.target instanceof Element ? event.target.closest(".tooltip") : null;
+  if (tooltip && window.matchMedia("(max-width: 720px)").matches) {
+    event.preventDefault();
+    event.stopPropagation();
+    openTipSheet(tooltip.dataset.tipTitle || "Подсказка", tooltip.dataset.tip || "");
+    return;
+  }
+
+  if (event.target instanceof Element && event.target.closest("[data-tip-close]")) {
+    closeTipSheet();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeTipSheet();
 });
 
 function matchesFilter(day) {
@@ -202,6 +281,7 @@ function matchesQuery(day) {
       exercise.title,
       exercise.summary,
       exercise.muscles,
+      searchableValue(exercise.weight),
       exercise.tags.join(" "),
     ]),
   ].join(" ");
@@ -260,7 +340,7 @@ function renderWeek() {
           <h2>${day.title}</h2>
         </div>
         <label class="mini-check" title="Тренировка выполнена">
-          <input type="checkbox" ${saved.days[day.id] ? "checked" : ""} />
+          <input type="checkbox" data-day-done="${day.id}" ${saved.days[day.id] ? "checked" : ""} />
         </label>
       </div>
       <p class="day-type">${day.type}</p>
@@ -278,8 +358,7 @@ function renderWeek() {
     });
     card.querySelector("input").addEventListener("click", (event) => event.stopPropagation());
     card.querySelector("input").addEventListener("change", (event) => {
-      saved.days[day.id] = event.target.checked;
-      persist();
+      setDayCompletion(day, event.target.checked);
     });
     els.week.append(card);
   });
@@ -298,6 +377,7 @@ function renderDayDetails() {
       exercise.title,
       exercise.summary,
       exercise.muscles,
+      searchableValue(exercise.weight),
       exercise.tags.join(" "),
     ].join(" "));
     return filterOk && haystack.includes(normalize(state.query));
@@ -320,7 +400,7 @@ function renderDayDetails() {
         <p>${day.summary}</p>
       </div>
       <label class="complete-day">
-        <input id="activeDayDone" type="checkbox" ${saved.days[day.id] ? "checked" : ""} />
+        <input id="activeDayDone" type="checkbox" data-day-done="${day.id}" ${saved.days[day.id] ? "checked" : ""} />
         <span>Тренировка выполнена</span>
       </label>
     </div>
@@ -355,9 +435,7 @@ function renderDayDetails() {
   `;
 
   els.dayDetails.querySelector("#activeDayDone").addEventListener("change", (event) => {
-    saved.days[day.id] = event.target.checked;
-    persist();
-    renderWeek();
+    setDayCompletion(day, event.target.checked);
   });
 
   els.dayDetails.querySelector("#dayNotes").addEventListener("input", (event) => {
@@ -501,7 +579,7 @@ function renderExercise(item, order) {
   const applyExerciseState = (done) => {
     node.classList.toggle("is-done", done);
     doneButton.setAttribute("aria-pressed", String(done));
-    doneButton.querySelector(".done-text").textContent = done ? "Сделано" : "Не сделано";
+    doneButton.querySelector(".done-text").textContent = done ? "Выполнено" : "Отметить выполненным";
   };
   const toggleExercise = () => {
     const done = !saved.exercises[item.id];
@@ -545,9 +623,9 @@ function renderExercise(item, order) {
     <div>
       <dt>
         ${key}
-        <button class="tooltip" type="button" aria-label="${metricHelp[key]}" data-tip="${metricHelp[key]}">?</button>
+        <button class="tooltip" type="button" aria-label="${metricHelp[key]}" data-tip-title="${key}" data-tip="${metricHelp[key]}">?</button>
       </dt>
-      <dd>${value}</dd>
+      <dd class="${key === "Вес" && typeof value === "object" ? "metric-weight" : ""}">${metricValue(value)}</dd>
     </div>
   `).join("");
   node.querySelector(".muscles").innerHTML = `<strong>Мышцы:</strong> ${item.muscles}`;
@@ -613,4 +691,6 @@ els.quickMode.addEventListener("change", (event) => {
 els.todayButton.addEventListener("click", () => selectDay(todayWorkoutId()));
 
 renderLists();
+syncAllDayCompletion();
+persist();
 render();

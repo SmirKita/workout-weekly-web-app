@@ -148,6 +148,16 @@
       Наверх
     </button>
 
+    <div class="tip-sheet" id="tipSheet" aria-hidden="true">
+      <button class="tip-sheet__backdrop" type="button" data-tip-close aria-label="Закрыть подсказку"></button>
+      <div class="tip-sheet__panel" role="dialog" aria-modal="true" aria-labelledby="tipSheetTitle">
+        <button class="tip-sheet__close" type="button" data-tip-close aria-label="Закрыть">×</button>
+        <h2 class="tip-sheet__title" id="tipSheetTitle">Подсказка</h2>
+        <p class="tip-sheet__text"></p>
+        <button class="tip-sheet__ok" type="button" data-tip-close>Понятно</button>
+      </div>
+    </div>
+
     <template id="exerciseTemplate">
       <article class="exercise-card">
         <button class="done-line exercise-done" type="button" aria-pressed="false">
