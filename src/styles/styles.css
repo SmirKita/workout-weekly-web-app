@@ -877,8 +877,7 @@ p {
 
 .exercise-card.is-quick .media-wrap,
 .exercise-card.is-quick .summary,
-.exercise-card.is-quick .muscles,
-.exercise-card.is-quick .details-list {
+.exercise-card.is-quick .muscles {
   display: none;
 }
 

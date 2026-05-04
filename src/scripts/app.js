@@ -554,20 +554,22 @@ function renderExercise(item, order) {
 
   const details = node.querySelector(".details-list");
   details.innerHTML = "";
-  if (!state.quickMode) {
-    [
+  const detailRows = state.quickMode
+    ? [["Техника", item.technique]]
+    : [
       ["Техника", item.technique],
       ["Ошибки", item.mistakes],
       ["Прогрессия", item.progression],
-    ].forEach(([title, text], index) => {
-      const detail = document.createElement("details");
-      detail.open = index === 0;
-      detail.innerHTML = `<summary>${title}</summary><p>${text}</p>`;
-      detail.addEventListener("click", (event) => event.stopPropagation());
-      detail.addEventListener("keydown", (event) => event.stopPropagation());
-      details.append(detail);
-    });
-  }
+    ];
+
+  detailRows.forEach(([title, text], index) => {
+    const detail = document.createElement("details");
+    detail.open = !state.quickMode && index === 0;
+    detail.innerHTML = `<summary>${title}</summary><p>${text}</p>`;
+    detail.addEventListener("click", (event) => event.stopPropagation());
+    detail.addEventListener("keydown", (event) => event.stopPropagation());
+    details.append(detail);
+  });
 
   return node;
 }
