@@ -13,6 +13,7 @@ const baseUrl = import.meta.env.BASE_URL;
 
 const els = {
   hero: document.querySelector(".hero"),
+  scrollTopButton: document.querySelector("#scrollTopButton"),
   dayPills: document.querySelector("#dayPills"),
   todayButton: document.querySelector("#todayButton"),
   week: document.querySelector("#week"),
@@ -60,7 +61,17 @@ function assetPath(path) {
   return `${baseUrl}${path.replace(/^\/+/, "")}`;
 }
 
-els.hero?.style.setProperty("--hero-image", `url("${assetPath("assets/exercises/hip-thrust.jpg")}")`);
+els.hero?.style.setProperty("--hero-image", `url("${assetPath("assets/hero/workout-hero.png")}")`);
+
+function updateScrollTopButton() {
+  els.scrollTopButton?.classList.toggle("is-visible", window.scrollY > 420);
+}
+
+window.addEventListener("scroll", updateScrollTopButton, { passive: true });
+
+els.scrollTopButton?.addEventListener("click", () => {
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
 
 function matchesFilter(day) {
   if (state.filter === "Все") return true;
