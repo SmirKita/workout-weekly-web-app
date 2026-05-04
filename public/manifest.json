@@ -1,0 +1,18 @@
+{
+  "name": "Недельный план тренировок",
+  "short_name": "Тренировки",
+  "description": "Интерактивный недельный план тренировок с отметками выполнения и заметками.",
+  "start_url": "/workout-weekly-web-app/",
+  "scope": "/workout-weekly-web-app/",
+  "display": "standalone",
+  "background_color": "#111827",
+  "theme_color": "#111827",
+  "icons": [
+    {
+      "src": "/workout-weekly-web-app/icons/app-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
