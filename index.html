@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Недельный план тренировок</title>
+    <link rel="stylesheet" href="src/styles/styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <nav class="topbar" aria-label="Навигация">
+        <a href="#week">Неделя</a>
+        <a href="#search">Поиск</a>
+        <a href="#legend">Как читать план</a>
+        <a href="#safety">Безопасность</a>
+        <a href="%BASE_URL%source/Методичка_недельный_план_тренировок.pdf">PDF</a>
+      </nav>
+      <div class="hero__content">
+        <p class="eyebrow">01 Workout Weekly Web App</p>
+        <h1>Недельный план тренировок</h1>
+        <p>
+          Удобная веб-версия методички: дни недели, быстрый режим для зала, поиск,
+          отметки выполнения и заметки сохраняются в браузере.
+        </p>
+      </div>
+    </header>
+
+    <main>
+      <section class="toolbar" aria-label="Быстрый выбор дня">
+        <div class="day-pills" id="dayPills"></div>
+        <button class="today-button" id="todayButton" type="button">Сегодня</button>
+      </section>
+
+      <section class="panel" id="search">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Поиск и фильтры</p>
+            <h2>Быстро найти день или упражнение</h2>
+          </div>
+          <label class="quick-mode">
+            <input id="quickMode" type="checkbox" />
+            <span>Быстро в зале</span>
+          </label>
+        </div>
+        <div class="search-row">
+          <input
+            id="searchInput"
+            type="search"
+            placeholder="Искать: йога, бассейн, кор, спина, ноги, плечи, упражнение..."
+          />
+        </div>
+        <div class="filters" id="filters"></div>
+      </section>
+
+      <section class="legend-card" id="legend">
+        <details>
+          <summary>
+            <span class="help-mark" aria-hidden="true">?</span>
+            <span>
+              <strong>Условные обозначения / Как читать план</strong>
+              <small>RPE, RIR, подходы, повторы, отдых, разговорный тест и прогрессия</small>
+            </span>
+          </summary>
+          <div class="legend-note">
+            На Конкоре пульс может не отражать реальную нагрузку, поэтому ориентируемся на RPE,
+            самочувствие и разговорный тест.
+          </div>
+          <div class="legend-grid">
+            <details open>
+              <summary>RPE — тяжесть нагрузки</summary>
+              <ul>
+                <li><strong>RPE 4-5</strong> — легко, дышу спокойно, могу говорить без проблем.</li>
+                <li><strong>RPE 6</strong> — умеренно, могу говорить предложениями.</li>
+                <li><strong>RPE 7</strong> — тяжело, говорю короткими фразами, техника под контролем.</li>
+                <li><strong>RPE 8</strong> — очень тяжело, техника ещё сохраняется. Используется редко.</li>
+                <li><strong>RPE 9-10</strong> — почти максимум / максимум. В этом плане не нужно.</li>
+              </ul>
+            </details>
+            <details>
+              <summary>RIR — повторы в запасе</summary>
+              <ul>
+                <li><strong>RIR 3</strong> — мог бы сделать ещё примерно 3 повтора.</li>
+                <li><strong>RIR 2</strong> — мог бы сделать ещё примерно 2 повтора.</li>
+                <li><strong>RIR 1</strong> — мог бы сделать ещё 1 повтор.</li>
+                <li><strong>RIR 0</strong> — отказ. В этом плане не используем.</li>
+                <li><strong>RIR 1-3</strong> — основной рабочий диапазон силовой части.</li>
+              </ul>
+            </details>
+            <details>
+              <summary>Подходы, повторы и отдых</summary>
+              <ul>
+                <li><strong>Подход</strong> — серия повторений без длинного отдыха.</li>
+                <li><strong>Повтор</strong> — одно полное движение упражнения.</li>
+                <li><strong>3×10-12</strong> — 3 подхода по 10-12 повторений.</li>
+                <li><strong>Отдых 60-90 сек</strong> — пауза 1-1,5 минуты между подходами.</li>
+              </ul>
+            </details>
+            <details>
+              <summary>Разговорный тест и кардио</summary>
+              <ul>
+                <li>Говорю предложениями — нагрузка умеренная.</li>
+                <li>Говорю короткими фразами — нагрузка высокая.</li>
+                <li>Не могу говорить — слишком тяжело, нужно снизить темп.</li>
+                <li>Кардио RPE 4-5 — лёгкая или умеренная нагрузка.</li>
+                <li>Кардио RPE 6-7 — ощутимо, но без спринта и потери контроля.</li>
+                <li>Бассейн RPE 5-7 — плыть активно, но не «умирать» и не разваливать технику.</li>
+              </ul>
+            </details>
+            <details>
+              <summary>Разминка, заминка, прогрессия</summary>
+              <ul>
+                <li><strong>Разминка</strong> — подготовка суставов и мышц, чтобы снизить риск травм и лучше включить нужные мышцы.</li>
+                <li><strong>Заминка</strong> — спокойное завершение: ходьба, растяжка, дыхание.</li>
+                <li><strong>Двойная прогрессия</strong> — сначала довести подходы до верхней границы повторений, потом добавить небольшой вес.</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+      </section>
+
+      <section id="week" class="week-grid" aria-label="Недельная сетка"></section>
+
+      <section id="dayDetails" class="day-details" aria-live="polite"></section>
+
+      <section class="info-grid" id="safety">
+        <article class="info-card">
+          <p class="eyebrow">Важно</p>
+          <h2>Безопасность</h2>
+          <ul id="safetyList"></ul>
+        </article>
+        <article class="info-card">
+          <p class="eyebrow">Рост нагрузки</p>
+          <h2>Как прогрессировать</h2>
+          <ul id="progressionList"></ul>
+        </article>
+      </section>
+    </main>
+
+    <template id="exerciseTemplate">
+      <article class="exercise-card">
+        <label class="done-line">
+          <input class="exercise-done" type="checkbox" />
+          <span>Сделано</span>
+        </label>
+        <div class="media-wrap"></div>
+        <div class="exercise-card__body">
+          <h3></h3>
+          <p class="summary"></p>
+          <dl class="metrics"></dl>
+          <div class="muscles"></div>
+          <div class="details-list"></div>
+        </div>
+      </article>
+    </template>
+
+    <script type="module" src="src/scripts/app.js"></script>
+  </body>
+</html>
