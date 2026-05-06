@@ -602,15 +602,21 @@ function renderExercise(item, order) {
   });
 
   const media = node.querySelector(".media-wrap");
-  const image = document.createElement("img");
-  image.src = assetPath(item.image);
-  image.alt = item.title;
-  image.loading = "lazy";
-  image.addEventListener("error", () => {
+  const showPlaceholder = () => {
     media.classList.add("is-placeholder");
     media.innerHTML = `<div><strong>Картинка упражнения будет добавлена</strong><span>${item.title}</span></div>`;
-  }, { once: true });
-  media.append(image);
+  };
+
+  if (item.image) {
+    const image = document.createElement("img");
+    image.src = assetPath(item.image);
+    image.alt = item.title;
+    image.loading = "lazy";
+    image.addEventListener("error", showPlaceholder, { once: true });
+    media.append(image);
+  } else {
+    showPlaceholder();
+  }
 
   node.querySelector("h3").textContent = `${order}. ${item.title}`;
   node.querySelector(".summary").textContent = item.summary;
