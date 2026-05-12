@@ -139,6 +139,7 @@ main {
 .toolbar,
 .panel,
 .legend-card,
+.history-card,
 .day-hero,
 .info-card,
 .notes-box,
@@ -200,12 +201,14 @@ main {
   overflow: hidden;
 }
 
-.legend-card > details {
+.legend-card > details,
+.history-card > details {
   border: 0;
   padding: 0;
 }
 
-.legend-card > details > summary {
+.legend-card > details > summary,
+.history-card > details > summary {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -214,6 +217,7 @@ main {
 }
 
 .legend-card > details > summary::-webkit-details-marker,
+.history-card > details > summary::-webkit-details-marker,
 .legend-grid details > summary::-webkit-details-marker {
   display: none;
 }
@@ -239,6 +243,64 @@ main {
   margin-top: 2px;
   color: var(--muted);
   font-weight: 600;
+}
+
+.history-card {
+  margin: 0 0 22px;
+  overflow: hidden;
+}
+
+.history-card summary strong,
+.history-card summary small {
+  display: block;
+}
+
+.history-card summary small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.history-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 20px 20px;
+}
+
+.history-week {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfcfa;
+  padding: 12px;
+}
+
+.history-week.is-current {
+  border-color: rgba(49, 108, 159, 0.38);
+  background: #f2f7fb;
+}
+
+.history-week > div:first-child,
+.history-week__stats {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.history-week strong {
+  font-weight: 900;
+}
+
+.history-week span,
+.history-empty {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.history-empty {
+  margin: 0;
+  padding: 0 20px 20px;
 }
 
 .legend-note {
@@ -1185,6 +1247,7 @@ details p {
   }
 
   .week-grid,
+  .history-list,
   .info-grid {
     grid-template-columns: 1fr;
   }

@@ -7,7 +7,9 @@ const state = {
   quickMode: false,
 };
 
-const storageKey = "workout-weekly-app:v1";
+const currentWeek = getCurrentWeekInfo();
+const progressStorageKey = `workout-progress-${currentWeek.key}`;
+const notesStorageKey = `workout-notes-${currentWeek.key}`;
 const saved = loadSaved();
 const baseUrl = import.meta.env.BASE_URL;
 
@@ -21,13 +23,14 @@ const els = {
   searchInput: document.querySelector("#searchInput"),
   filters: document.querySelector("#filters"),
   quickMode: document.querySelector("#quickMode"),
+  historyList: document.querySelector("#historyList"),
   safetyList: document.querySelector("#safetyList"),
   progressionList: document.querySelector("#progressionList"),
 };
 
 const metricHelp = {
   "Подходы/повторы": "Например, 3x10-12 означает: 3 подхода по 10-12 повторений.",
-  Вес: "Ориентир нагрузки. Если техника разваливается, вес нужно снизить.",
+  Вес: "Ориентир нагрузки. Если слишком легко — замедлить темп и добавить паузу, потом повышать вес. Если техника ломается — снизить вес на один шаг.",
   "RPE/RIR": "RPE — насколько тяжело по ощущениям. RIR — сколько повторов осталось в запасе.",
   Отдых: "Пауза между подходами перед следующим рабочим подходом.",
 };
@@ -38,20 +41,72 @@ const groupLabels = {
   finish: "Завершение",
 };
 
-function loadSaved() {
+function weekStartFor(date) {
+  const value = new Date(date);
+  value.setHours(0, 0, 0, 0);
+  const dayFromMonday = (value.getDay() + 6) % 7;
+  value.setDate(value.getDate() - dayFromMonday);
+  return value;
+}
+
+function getCurrentWeekInfo(offset = 0) {
+  const monday = weekStartFor(new Date());
+  monday.setDate(monday.getDate() - offset * 7);
+  const thursday = new Date(monday);
+  thursday.setDate(monday.getDate() + 3);
+  const weekYear = thursday.getFullYear();
+  const firstMonday = weekStartFor(new Date(weekYear, 0, 4));
+  const weekNumber = Math.round((monday - firstMonday) / 604800000) + 1;
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return {
+    key: `${weekYear}-W${String(weekNumber).padStart(2, "0")}`,
+    weekNumber,
+    start: monday,
+    end: sunday,
+  };
+}
+
+function emptyProgress() {
+  return {
+    days: {},
+    exercises: {},
+  };
+}
+
+function loadJson(key, fallback) {
   try {
-    return JSON.parse(localStorage.getItem(storageKey)) || {
-      days: {},
-      exercises: {},
-      notes: {},
-    };
+    return JSON.parse(localStorage.getItem(key)) || fallback;
   } catch {
-    return { days: {}, exercises: {}, notes: {} };
+    return fallback;
   }
 }
 
+function loadSaved() {
+  const progress = loadJson(progressStorageKey, null);
+  const notes = loadJson(notesStorageKey, null);
+
+  if (progress || notes) {
+    return {
+      ...emptyProgress(),
+      ...(progress || {}),
+      notes: notes || {},
+    };
+  }
+
+  return {
+    ...emptyProgress(),
+    notes: {},
+  };
+}
+
 function persist() {
-  localStorage.setItem(storageKey, JSON.stringify(saved));
+  localStorage.setItem(progressStorageKey, JSON.stringify({
+    days: saved.days,
+    exercises: saved.exercises,
+    updatedAt: new Date().toISOString(),
+  }));
+  localStorage.setItem(notesStorageKey, JSON.stringify(saved.notes || {}));
 }
 
 function todayWorkoutId() {
@@ -117,6 +172,25 @@ function progressForDay(day) {
   };
 }
 
+function statsForSaved(source) {
+  const progress = {
+    daysDone: 0,
+    daysTotal: workouts.length,
+    done: 0,
+    total: 0,
+  };
+
+  workouts.forEach((day) => {
+    if (source.days?.[day.id]) progress.daysDone += 1;
+    completionItems(day).forEach((item) => {
+      progress.total += 1;
+      if (source.exercises?.[item.key]) progress.done += 1;
+    });
+  });
+
+  return progress;
+}
+
 function percent(done, total) {
   return total ? Math.round((done / total) * 100) : 0;
 }
@@ -154,6 +228,57 @@ function progressMarkup(day, compact = false) {
   `;
 }
 
+function formatHistoryDate(date) {
+  return date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" }).replace(".", "");
+}
+
+function hasStoredProgress(source) {
+  return Boolean(
+    Object.values(source.days || {}).some(Boolean) ||
+      Object.values(source.exercises || {}).some(Boolean),
+  );
+}
+
+function renderHistory() {
+  if (!els.historyList) return;
+
+  const weeks = Array.from({ length: 8 }, (_, index) => getCurrentWeekInfo(index));
+  const rows = weeks.map((week) => {
+    const progress = loadJson(`workout-progress-${week.key}`, emptyProgress());
+    const isCurrent = week.key === currentWeek.key;
+    const source = isCurrent ? saved : progress;
+    const stats = statsForSaved(source);
+    return {
+      week,
+      stats,
+      hasProgress: isCurrent || hasStoredProgress(source),
+      totalPercent: percent(stats.done, stats.total),
+    };
+  });
+
+  if (!rows.some((row) => row.hasProgress && row.totalPercent > 0)) {
+    els.historyList.innerHTML = `<p class="history-empty">История появится после первой завершённой недели.</p>`;
+    return;
+  }
+
+  els.historyList.innerHTML = rows
+    .filter((row) => row.hasProgress)
+    .map((row) => `
+      <article class="history-week ${row.week.key === currentWeek.key ? "is-current" : ""}">
+        <div>
+          <strong>${row.week.key === currentWeek.key ? "Эта неделя" : `Неделя ${row.week.weekNumber}`}</strong>
+          <span>${formatHistoryDate(row.week.start)}-${formatHistoryDate(row.week.end)}</span>
+        </div>
+        <div class="history-week__stats">
+          <span>${row.stats.daysDone}/${row.stats.daysTotal} дней</span>
+          <strong>${row.totalPercent}%</strong>
+        </div>
+        <div class="progress-bar" aria-hidden="true"><span style="width: ${row.totalPercent}%"></span></div>
+      </article>
+    `)
+    .join("");
+}
+
 function updateProgressViews() {
   const day = workouts.find((item) => item.id === state.activeDayId);
   if (!day) return;
@@ -170,6 +295,8 @@ function updateProgressViews() {
     const progressDay = workouts.find((item) => item.id === node.dataset.dayDone);
     if (progressDay) node.checked = Boolean(saved.days[progressDay.id]);
   });
+
+  renderHistory();
 }
 
 function setCompletion(key, done) {
@@ -681,6 +808,7 @@ function render() {
   renderFilters();
   renderWeek();
   renderDayDetails();
+  renderHistory();
 }
 
 els.searchInput.addEventListener("input", (event) => {
