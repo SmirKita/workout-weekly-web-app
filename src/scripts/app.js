@@ -31,7 +31,7 @@ const els = {
 
 const metricHelp = {
   "Подходы/повторы": "Например, 3x10-12 означает: 3 подхода по 10-12 повторений.",
-  Вес: "Ориентир нагрузки. Если слишком легко — замедлить темп и добавить паузу, потом повышать вес. Если техника ломается — снизить вес на один шаг.",
+  Вес: "Рабочий стартовый вес на эту неделю. Выполни упражнение по плану и отметь, как прошло: легко, норма или тяжело. В конце недели по отметкам скорректируем вес.",
   "RPE/RIR": "RPE — насколько тяжело по ощущениям. RIR — сколько повторов осталось в запасе.",
   Отдых: "Пауза между подходами перед следующим рабочим подходом.",
 };
@@ -44,7 +44,7 @@ const groupLabels = {
 
 const effortOptions = {
   easy: "Легко",
-  normal: "Нормально",
+  normal: "Норма",
   hard: "Тяжело",
 };
 
@@ -361,7 +361,7 @@ function renderLoadSummary() {
       <div class="load-summary">
         <div class="load-summary__stats">
           <span class="is-easy">Легко: <strong>${feedback.counts.easy}</strong></span>
-          <span class="is-normal">Нормально: <strong>${feedback.counts.normal}</strong></span>
+          <span class="is-normal">Норма: <strong>${feedback.counts.normal}</strong></span>
           <span class="is-hard">Тяжело: <strong>${feedback.counts.hard}</strong></span>
         </div>
         <div class="load-summary__stats">
@@ -456,7 +456,6 @@ function metricValue(value) {
   if (!value || typeof value !== "object") return value;
   return [
     value.start ? `<span><strong>Старт:</strong> ${value.start}</span>` : `<span><strong>Старт:</strong> уточнить</span>`,
-    value.range ? `<span><strong>Диапазон:</strong> ${value.range}</span>` : "",
     value.hint ? `<span><strong>Подсказка:</strong> ${value.hint}</span>` : "",
   ].filter(Boolean).join("");
 }
