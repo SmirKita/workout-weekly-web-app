@@ -131,6 +131,16 @@
                 <li><strong>Что делать:</strong> снизить вес на один шаг и сделать чисто.</li>
               </ul>
             </details>
+            <details>
+              <summary>Как мы будем подбирать веса</summary>
+              <ul>
+                <li>На этой неделе веса не угадываем, а собираем ощущения.</li>
+                <li>Выполняем упражнения по плану: стараемся попасть в верхнюю границу повторов и сохранить технику.</li>
+                <li>После каждого упражнения отмечаем «Легко / Нормально / Тяжело».</li>
+                <li>Если упражнение стабильно лёгкое и общая усталость не высокая — постепенно повышаем вес.</li>
+                <li>Если упражнение тяжёлое или техника ломается — вес снижаем или оставляем до стабилизации.</li>
+              </ul>
+            </details>
           </div>
         </details>
       </section>
@@ -146,6 +156,8 @@
           <div class="history-list" id="historyList"></div>
         </details>
       </section>
+
+      <section class="load-summary-card" id="loadSummary"></section>
 
       <section id="week" class="week-grid" aria-label="Недельная сетка"></section>
 
@@ -181,10 +193,6 @@
 
     <template id="exerciseTemplate">
       <article class="exercise-card">
-        <button class="done-line exercise-done" type="button" aria-pressed="false">
-          <span class="done-icon" aria-hidden="true">✓</span>
-          <span class="done-text">Не сделано</span>
-        </button>
         <div class="media-wrap"></div>
         <div class="exercise-card__body">
           <h3></h3>
@@ -192,6 +200,16 @@
           <dl class="metrics"></dl>
           <div class="muscles"></div>
           <div class="details-list"></div>
+        </div>
+        <div class="exercise-card__actions">
+          <button class="done-line exercise-done" type="button" aria-pressed="false">
+            <span class="done-icon" aria-hidden="true">✓</span>
+            <span class="done-text">Не сделано</span>
+          </button>
+          <div class="effort-feedback" aria-label="Оценка нагрузки упражнения">
+            <div class="feedback-title">Как прошло?</div>
+            <div class="feedback-buttons"></div>
+          </div>
         </div>
       </article>
     </template>

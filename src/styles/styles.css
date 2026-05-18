@@ -140,8 +140,10 @@ main {
 .panel,
 .legend-card,
 .history-card,
+.load-summary-card,
 .day-hero,
 .info-card,
+.fatigue-card,
 .notes-box,
 .day-meta article,
 .exercise-card,
@@ -202,13 +204,15 @@ main {
 }
 
 .legend-card > details,
-.history-card > details {
+.history-card > details,
+.load-summary-card > details {
   border: 0;
   padding: 0;
 }
 
 .legend-card > details > summary,
-.history-card > details > summary {
+.history-card > details > summary,
+.load-summary-card > details > summary {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -218,6 +222,7 @@ main {
 
 .legend-card > details > summary::-webkit-details-marker,
 .history-card > details > summary::-webkit-details-marker,
+.load-summary-card > details > summary::-webkit-details-marker,
 .legend-grid details > summary::-webkit-details-marker {
   display: none;
 }
@@ -250,12 +255,20 @@ main {
   overflow: hidden;
 }
 
+.load-summary-card {
+  margin: 0 0 22px;
+  overflow: hidden;
+}
+
 .history-card summary strong,
-.history-card summary small {
+.history-card summary small,
+.load-summary-card summary strong,
+.load-summary-card summary small {
   display: block;
 }
 
-.history-card summary small {
+.history-card summary small,
+.load-summary-card summary small {
   margin-top: 2px;
   color: var(--muted);
   font-weight: 600;
@@ -301,6 +314,82 @@ main {
 .history-empty {
   margin: 0;
   padding: 0 20px 20px;
+}
+
+.load-summary {
+  padding: 0 20px 20px;
+}
+
+.load-summary__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.load-summary__stats span {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fbfcfa;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.load-summary__stats .is-easy {
+  color: #285f3e;
+  background: #eef7f1;
+}
+
+.load-summary__stats .is-normal {
+  color: #315172;
+  background: #f2f7fb;
+}
+
+.load-summary__stats .is-hard {
+  color: #7a3f20;
+  background: #fff3ea;
+}
+
+.load-summary__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.load-summary__grid article {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfcfa;
+  padding: 12px;
+}
+
+.load-summary__grid h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.load-summary__grid ul,
+.load-summary__grid p {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.load-summary__grid p {
+  padding-left: 0;
+}
+
+.load-summary__note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-weight: 800;
 }
 
 .legend-note {
@@ -669,6 +758,24 @@ p {
   background: #fbfcfa;
 }
 
+.fatigue-card {
+  margin-top: 16px;
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+
+.fatigue-card h3 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.fatigue-card p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .training-flow {
   display: grid;
   gap: 16px;
@@ -938,6 +1045,12 @@ p {
   padding: 18px;
 }
 
+.exercise-card__actions {
+  padding: 0 18px 18px;
+  display: grid;
+  gap: 10px;
+}
+
 .exercise-card h3 {
   margin: 0 0 8px;
   font-size: 24px;
@@ -956,6 +1069,60 @@ p {
 
 .exercise-card.is-quick .metrics {
   margin-bottom: 0;
+}
+
+.effort-feedback {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfcfa;
+}
+
+.feedback-title {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.feedback-buttons,
+.fatigue-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.effort-button,
+.fatigue-button {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font-weight: 900;
+  padding: 8px 10px;
+}
+
+.effort-button.is-easy.is-selected,
+.fatigue-button.is-light.is-selected {
+  border-color: transparent;
+  background: #dff3e6;
+  color: #245f3c;
+}
+
+.effort-button.is-normal.is-selected,
+.fatigue-button.is-normal.is-selected {
+  border-color: transparent;
+  background: #e4f0fb;
+  color: #2d5272;
+}
+
+.effort-button.is-hard.is-selected,
+.fatigue-button.is-strong.is-selected {
+  border-color: transparent;
+  background: #ffe3d2;
+  color: #7b3b1c;
 }
 
 .summary,
@@ -1248,6 +1415,7 @@ details p {
 
   .week-grid,
   .history-list,
+  .load-summary__grid,
   .info-grid {
     grid-template-columns: 1fr;
   }
@@ -1308,12 +1476,16 @@ details p {
     order: 2;
   }
 
+  .exercise-card__actions {
+    order: 3;
+    padding: 0 14px 14px;
+  }
+
   .done-line {
     position: static;
-    order: 3;
-    width: calc(100% - 28px);
+    width: 100%;
     min-height: 48px;
-    margin: 0 14px 14px;
+    margin: 0;
     padding: 12px 14px;
   }
 

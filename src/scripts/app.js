@@ -24,6 +24,7 @@ const els = {
   filters: document.querySelector("#filters"),
   quickMode: document.querySelector("#quickMode"),
   historyList: document.querySelector("#historyList"),
+  loadSummary: document.querySelector("#loadSummary"),
   safetyList: document.querySelector("#safetyList"),
   progressionList: document.querySelector("#progressionList"),
 };
@@ -39,6 +40,18 @@ const groupLabels = {
   prep: "Подготовка",
   main: "Основная часть",
   finish: "Завершение",
+};
+
+const effortOptions = {
+  easy: "Легко",
+  normal: "Нормально",
+  hard: "Тяжело",
+};
+
+const fatigueOptions = {
+  light: "Лёгкая",
+  normal: "Нормальная",
+  strong: "Сильная",
 };
 
 function weekStartFor(date) {
@@ -71,6 +84,8 @@ function emptyProgress() {
   return {
     days: {},
     exercises: {},
+    feedback: {},
+    fatigue: {},
   };
 }
 
@@ -104,6 +119,8 @@ function persist() {
   localStorage.setItem(progressStorageKey, JSON.stringify({
     days: saved.days,
     exercises: saved.exercises,
+    feedback: saved.feedback || {},
+    fatigue: saved.fatigue || {},
     updatedAt: new Date().toISOString(),
   }));
   localStorage.setItem(notesStorageKey, JSON.stringify(saved.notes || {}));
@@ -191,6 +208,33 @@ function statsForSaved(source) {
   return progress;
 }
 
+function feedbackStatsForSaved(source) {
+  const counts = { easy: 0, normal: 0, hard: 0 };
+  const easy = [];
+  const hard = [];
+  const feedback = source.feedback || {};
+
+  workouts.forEach((day) => {
+    day.exercises.forEach((exercise) => {
+      const value = feedback[exercise.id];
+      if (!value || !counts.hasOwnProperty(value)) return;
+      counts[value] += 1;
+      if (value === "easy") easy.push(exercise.title);
+      if (value === "hard") hard.push(exercise.title);
+    });
+  });
+
+  return { counts, easy, hard };
+}
+
+function fatigueStatsForSaved(source) {
+  const counts = { light: 0, normal: 0, strong: 0 };
+  Object.values(source.fatigue || {}).forEach((value) => {
+    if (counts.hasOwnProperty(value)) counts[value] += 1;
+  });
+  return counts;
+}
+
 function percent(done, total) {
   return total ? Math.round((done / total) * 100) : 0;
 }
@@ -235,7 +279,9 @@ function formatHistoryDate(date) {
 function hasStoredProgress(source) {
   return Boolean(
     Object.values(source.days || {}).some(Boolean) ||
-      Object.values(source.exercises || {}).some(Boolean),
+      Object.values(source.exercises || {}).some(Boolean) ||
+      Object.values(source.feedback || {}).some(Boolean) ||
+      Object.values(source.fatigue || {}).some(Boolean),
   );
 }
 
@@ -248,15 +294,17 @@ function renderHistory() {
     const isCurrent = week.key === currentWeek.key;
     const source = isCurrent ? saved : progress;
     const stats = statsForSaved(source);
+    const hasData = hasStoredProgress(source);
     return {
       week,
       stats,
+      hasData,
       hasProgress: isCurrent || hasStoredProgress(source),
       totalPercent: percent(stats.done, stats.total),
     };
   });
 
-  if (!rows.some((row) => row.hasProgress && row.totalPercent > 0)) {
+  if (!rows.some((row) => row.hasData)) {
     els.historyList.innerHTML = `<p class="history-empty">История появится после первой завершённой недели.</p>`;
     return;
   }
@@ -279,6 +327,76 @@ function renderHistory() {
     .join("");
 }
 
+function listMarkup(items, emptyText) {
+  if (!items.length) return `<p>${emptyText}</p>`;
+  return `<ul>${items.map((item) => `<li>${item}</li>`).join("")}</ul>`;
+}
+
+function repeatedFeedback(kind) {
+  const previousWeek = getCurrentWeekInfo(1);
+  const previous = loadJson(`workout-progress-${previousWeek.key}`, emptyProgress());
+  return workouts.flatMap((day) =>
+    day.exercises
+      .filter((exercise) => saved.feedback?.[exercise.id] === kind && previous.feedback?.[exercise.id] === kind)
+      .map((exercise) => exercise.title),
+  );
+}
+
+function renderLoadSummary() {
+  if (!els.loadSummary) return;
+  const wasOpen = els.loadSummary.querySelector("details")?.open;
+  const feedback = feedbackStatsForSaved(saved);
+  const fatigue = fatigueStatsForSaved(saved);
+  const repeatedEasy = repeatedFeedback("easy");
+  const repeatedHard = repeatedFeedback("hard");
+
+  els.loadSummary.innerHTML = `
+    <details ${wasOpen ? "open" : ""}>
+      <summary>
+        <span>
+          <strong>Итоги нагрузки за неделю</strong>
+          <small>Собираем ощущения по весам, ничего не меняем автоматически</small>
+        </span>
+      </summary>
+      <div class="load-summary">
+        <div class="load-summary__stats">
+          <span class="is-easy">Легко: <strong>${feedback.counts.easy}</strong></span>
+          <span class="is-normal">Нормально: <strong>${feedback.counts.normal}</strong></span>
+          <span class="is-hard">Тяжело: <strong>${feedback.counts.hard}</strong></span>
+        </div>
+        <div class="load-summary__stats">
+          <span>Усталость лёгкая: <strong>${fatigue.light}</strong></span>
+          <span>нормальная: <strong>${fatigue.normal}</strong></span>
+          <span>сильная: <strong>${fatigue.strong}</strong></span>
+        </div>
+        <div class="load-summary__grid">
+          <article>
+            <h3>Возможное повышение веса</h3>
+            ${listMarkup(feedback.easy, "Пока нет упражнений с оценкой «Легко».")}
+          </article>
+          <article>
+            <h3>Проверить нагрузку</h3>
+            ${listMarkup(feedback.hard, "Пока нет упражнений с оценкой «Тяжело».")}
+          </article>
+          <article>
+            <h3>Повторяется 2 недели</h3>
+            ${listMarkup(
+              [
+                ...repeatedEasy.map((item) => `${item} — легко 2 недели подряд`),
+                ...repeatedHard.map((item) => `${item} — тяжело 2 недели подряд`),
+              ],
+              "Повторов за 2 недели пока нет.",
+            )}
+          </article>
+        </div>
+        <p class="load-summary__note">
+          Вес не меняется автоматически. Сначала собираем ощущения за неделю, потом корректируем стартовые веса.
+        </p>
+      </div>
+    </details>
+  `;
+}
+
 function updateProgressViews() {
   const day = workouts.find((item) => item.id === state.activeDayId);
   if (!day) return;
@@ -297,6 +415,7 @@ function updateProgressViews() {
   });
 
   renderHistory();
+  renderLoadSummary();
 }
 
 function setCompletion(key, done) {
@@ -313,6 +432,18 @@ function setDayCompletion(day, done) {
   syncDayCompletion(day);
   persist();
   render();
+}
+
+function setExerciseFeedback(exerciseId, value) {
+  saved.feedback[exerciseId] = value;
+  persist();
+  renderLoadSummary();
+}
+
+function setDayFatigue(dayId, value) {
+  saved.fatigue[dayId] = value;
+  persist();
+  renderLoadSummary();
 }
 
 function shouldIgnoreToggle(event) {
@@ -559,6 +690,26 @@ function renderDayDetails() {
     </div>
 
     <div class="training-flow"></div>
+
+    <section class="fatigue-card" id="fatigueCard">
+      <div>
+        <p class="eyebrow">После тренировки</p>
+        <h3>Общая усталость</h3>
+        <p>Отметка относится ко всему дню и помогает понять, стоит ли повышать веса.</p>
+      </div>
+      <div class="fatigue-buttons" role="group" aria-label="Общая усталость после тренировки">
+        ${Object.entries(fatigueOptions).map(([value, label]) => `
+          <button
+            class="fatigue-button is-${value} ${saved.fatigue?.[day.id] === value ? "is-selected" : ""}"
+            type="button"
+            data-fatigue="${value}"
+            aria-pressed="${saved.fatigue?.[day.id] === value}"
+          >
+            ${label}
+          </button>
+        `).join("")}
+      </div>
+    </section>
   `;
 
   els.dayDetails.querySelector("#activeDayDone").addEventListener("change", (event) => {
@@ -570,6 +721,18 @@ function renderDayDetails() {
     persist();
   });
   els.dayDetails.querySelector("#dayNotes").addEventListener("click", (event) => event.stopPropagation());
+
+  els.dayDetails.querySelectorAll("[data-fatigue]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setDayFatigue(day.id, button.dataset.fatigue);
+      els.dayDetails.querySelectorAll("[data-fatigue]").forEach((item) => {
+        const selected = item.dataset.fatigue === button.dataset.fatigue;
+        item.classList.toggle("is-selected", selected);
+        item.setAttribute("aria-pressed", String(selected));
+      });
+    });
+  });
 
   const flow = els.dayDetails.querySelector(".training-flow");
   preSections.forEach((section) => flow.append(renderRoutineSection(section)));
@@ -728,6 +891,29 @@ function renderExercise(item, order) {
     toggleExercise();
   });
 
+  const feedbackButtons = node.querySelector(".feedback-buttons");
+  feedbackButtons.innerHTML = Object.entries(effortOptions).map(([value, label]) => `
+    <button
+      class="effort-button is-${value} ${saved.feedback?.[item.id] === value ? "is-selected" : ""}"
+      type="button"
+      data-effort="${value}"
+      aria-pressed="${saved.feedback?.[item.id] === value}"
+    >
+      ${label}
+    </button>
+  `).join("");
+  feedbackButtons.querySelectorAll("[data-effort]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setExerciseFeedback(item.id, button.dataset.effort);
+      feedbackButtons.querySelectorAll("[data-effort]").forEach((option) => {
+        const selected = option.dataset.effort === button.dataset.effort;
+        option.classList.toggle("is-selected", selected);
+        option.setAttribute("aria-pressed", String(selected));
+      });
+    });
+  });
+
   const media = node.querySelector(".media-wrap");
   const showPlaceholder = () => {
     media.classList.add("is-placeholder");
@@ -809,6 +995,7 @@ function render() {
   renderWeek();
   renderDayDetails();
   renderHistory();
+  renderLoadSummary();
 }
 
 els.searchInput.addEventListener("input", (event) => {
