@@ -5,6 +5,8 @@ const state = {
   query: "",
   filter: "Все",
   quickMode: false,
+  reportWeekKey: null,
+  showReportText: false,
 };
 
 const currentWeek = getCurrentWeekInfo();
@@ -25,6 +27,7 @@ const els = {
   quickMode: document.querySelector("#quickMode"),
   historyList: document.querySelector("#historyList"),
   loadSummary: document.querySelector("#loadSummary"),
+  weeklyReport: document.querySelector("#weeklyReport"),
   safetyList: document.querySelector("#safetyList"),
   progressionList: document.querySelector("#progressionList"),
 };
@@ -54,6 +57,18 @@ const fatigueOptions = {
   strong: "Сильная",
 };
 
+const effortReportLabels = {
+  easy: "легко",
+  normal: "нормально",
+  hard: "тяжело",
+};
+
+const fatigueReportLabels = {
+  light: "лёгкая",
+  normal: "нормальная",
+  strong: "сильная",
+};
+
 function weekStartFor(date) {
   const value = new Date(date);
   value.setHours(0, 0, 0, 0);
@@ -80,6 +95,24 @@ function getCurrentWeekInfo(offset = 0) {
   };
 }
 
+function getWeekInfoFromKey(key) {
+  const match = /^(\d{4})-W(\d{2})$/.exec(key);
+  if (!match) return currentWeek;
+  const weekYear = Number(match[1]);
+  const weekNumber = Number(match[2]);
+  const firstMonday = weekStartFor(new Date(weekYear, 0, 4));
+  const monday = new Date(firstMonday);
+  monday.setDate(firstMonday.getDate() + (weekNumber - 1) * 7);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return {
+    key,
+    weekNumber,
+    start: monday,
+    end: sunday,
+  };
+}
+
 function emptyProgress() {
   return {
     days: {},
@@ -95,6 +128,17 @@ function loadJson(key, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function savedForWeek(weekKey) {
+  if (weekKey === currentWeek.key) return saved;
+  const progress = loadJson(`workout-progress-${weekKey}`, emptyProgress());
+  const notes = loadJson(`workout-notes-${weekKey}`, {});
+  return {
+    ...emptyProgress(),
+    ...progress,
+    notes,
+  };
 }
 
 function loadSaved() {
@@ -235,6 +279,77 @@ function fatigueStatsForSaved(source) {
   return counts;
 }
 
+function weightText(weight) {
+  if (!weight || typeof weight !== "object") return weight || "не указан";
+  return weight.start || "уточнить";
+}
+
+function mainExerciseEntries(source) {
+  return workouts.flatMap((day) =>
+    day.exercises.map((exercise) => ({
+      day,
+      exercise,
+      weight: weightText(exercise.weight),
+      feedback: source.feedback?.[exercise.id] || "",
+      done: Boolean(source.exercises?.[exercise.id]),
+    })),
+  );
+}
+
+function availableWeekInfos() {
+  const keys = new Set([currentWeek.key]);
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    const match = /^workout-progress-(\d{4}-W\d{2})$/.exec(key || "");
+    if (match) keys.add(match[1]);
+  }
+  return [...keys]
+    .map(getWeekInfoFromKey)
+    .sort((a, b) => b.start - a.start);
+}
+
+function dayStatus(day, source) {
+  if (source.days?.[day.id]) return "выполнено";
+  const progress = progressForDayFromSource(day, source);
+  if (progress.done > 0) return "начато";
+  return "не выполнено";
+}
+
+function progressForDayFromSource(day, source) {
+  const items = completionItems(day);
+  const done = items.filter((item) => source.exercises?.[item.key]).length;
+  return {
+    done,
+    total: items.length,
+  };
+}
+
+function reportModel(weekKey) {
+  const week = getWeekInfoFromKey(weekKey);
+  const source = savedForWeek(week.key);
+  const stats = statsForSaved(source);
+  const entries = mainExerciseEntries(source);
+  const grouped = {
+    easy: entries.filter((entry) => entry.feedback === "easy"),
+    normal: entries.filter((entry) => entry.feedback === "normal"),
+    hard: entries.filter((entry) => entry.feedback === "hard"),
+    unrated: entries.filter((entry) => !entry.feedback),
+  };
+  const fatigue = fatigueStatsForSaved(source);
+  const hasData = hasStoredProgress(source);
+
+  return {
+    week,
+    source,
+    stats,
+    entries,
+    grouped,
+    fatigue,
+    hasData,
+    progressPercent: percent(stats.done, stats.total),
+  };
+}
+
 function percent(done, total) {
   return total ? Math.round((done / total) * 100) : 0;
 }
@@ -342,6 +457,112 @@ function repeatedFeedback(kind) {
   );
 }
 
+function reportEntryLine(entry) {
+  return `${entry.day.day} · ${entry.exercise.title} · ${entry.weight}`;
+}
+
+function recommendationFor(entry) {
+  if (entry.feedback === "easy") {
+    return `${entry.exercise.title} — ${entry.weight} → можно рассмотреть повышение на минимальный шаг, если техника чистая и усталость дня не высокая`;
+  }
+  if (entry.feedback === "normal") {
+    return `${entry.exercise.title} — ${entry.weight} → вес подходит, оставить без изменений`;
+  }
+  if (entry.feedback === "hard") {
+    return `${entry.exercise.title} — ${entry.weight} → оставить или снизить на один шаг, если снова тяжело или техника ломается`;
+  }
+  return "";
+}
+
+function reportList(items, emptyText, mapper = reportEntryLine) {
+  if (!items.length) return `<p class="weekly-report__empty">${emptyText}</p>`;
+  return `<ul>${items.map((item) => `<li>${mapper(item)}</li>`).join("")}</ul>`;
+}
+
+function reportConclusions(model) {
+  const lines = [];
+  const { easy, normal, hard } = model.grouped;
+  const strongFatigueDays = Object.entries(model.source.fatigue || {})
+    .filter(([, value]) => value === "strong")
+    .map(([dayId]) => workouts.find((day) => day.id === dayId)?.day)
+    .filter(Boolean);
+
+  if (!model.hasData) {
+    return ["На этой неделе пока нет отмеченных упражнений."];
+  }
+  if (normal.length >= easy.length && normal.length >= hard.length) {
+    lines.push("Большая часть весов подобрана нормально, базовые веса можно оставить.");
+  }
+  if (easy.length) {
+    lines.push("Упражнения с отметкой «Легко» можно рассмотреть для аккуратного повышения, если техника была чистой.");
+  }
+  if (hard.length) {
+    lines.push("Упражнения с отметкой «Тяжело» лучше не повышать: проверить технику, повторы и восстановление.");
+  }
+  if (strongFatigueDays.length) {
+    lines.push(`В дни с сильной усталостью (${strongFatigueDays.join(", ")}) веса лучше не повышать, даже если отдельные упражнения были лёгкими.`);
+  }
+  workouts.forEach((day) => {
+    const dayEasy = easy.filter((entry) => entry.day.id === day.id).length;
+    const dayHard = hard.filter((entry) => entry.day.id === day.id).length;
+    const dayFatigue = model.source.fatigue?.[day.id];
+    if (dayEasy >= 3 && dayFatigue === "light") {
+      lines.push(`${day.day}: много лёгких упражнений и лёгкая усталость — нагрузку можно аккуратно повышать.`);
+    }
+    if (dayHard >= 3) {
+      lines.push(`${day.day}: много тяжёлых упражнений — нагрузку лучше не повышать, проверить технику и восстановление.`);
+    }
+  });
+  lines.push("Веса автоматически не менялись.");
+  return [...new Set(lines)];
+}
+
+function weeklyReportText(model) {
+  const lines = [
+    `Итоги недели: ${model.week.key}`,
+    `Период: ${formatHistoryDate(model.week.start)}-${formatHistoryDate(model.week.end)}`,
+    "",
+    "Общий прогресс:",
+    `— Выполнено дней: ${model.stats.daysDone} из ${model.stats.daysTotal}`,
+    `— Выполнено пунктов: ${model.stats.done} из ${model.stats.total}`,
+    `— Общий прогресс: ${model.progressPercent}%`,
+  ];
+
+  workouts.forEach((day) => {
+    const dayEntries = day.exercises;
+    if (!dayEntries.length) return;
+    lines.push("", `${day.day} — ${day.title}`, `Статус: ${dayStatus(day, model.source)}`);
+    lines.push(`Общая усталость: ${fatigueReportLabels[model.source.fatigue?.[day.id]] || "не отмечено"}`);
+    lines.push("", "Основная часть:");
+    dayEntries.forEach((exercise) => {
+      lines.push(`— ${exercise.title} — ${weightText(exercise.weight)} — ${effortReportLabels[model.source.feedback?.[exercise.id]] || "не отмечено"}`);
+    });
+  });
+
+  lines.push(
+    "",
+    "Сводка по нагрузке:",
+    `— Легко: ${model.grouped.easy.length}`,
+    `— Нормально: ${model.grouped.normal.length}`,
+    `— Тяжело: ${model.grouped.hard.length}`,
+    `— Не отмечено: ${model.grouped.unrated.length}`,
+    "",
+    "Предварительные выводы:",
+    ...reportConclusions(model).map((line) => `— ${line}`),
+    "",
+    "Кандидаты на повышение:",
+    ...(model.grouped.easy.length ? model.grouped.easy.map((entry) => `— ${recommendationFor(entry)}`) : ["— нет"]),
+    "",
+    "Оставить как есть:",
+    ...(model.grouped.normal.length ? model.grouped.normal.map((entry) => `— ${recommendationFor(entry)}`) : ["— нет"]),
+    "",
+    "Проверить / возможно снизить:",
+    ...(model.grouped.hard.length ? model.grouped.hard.map((entry) => `— ${recommendationFor(entry)}`) : ["— нет"]),
+  );
+
+  return lines.join("\n");
+}
+
 function renderLoadSummary() {
   if (!els.loadSummary) return;
   const wasOpen = els.loadSummary.querySelector("details")?.open;
@@ -397,6 +618,125 @@ function renderLoadSummary() {
   `;
 }
 
+function renderWeeklyReport() {
+  if (!els.weeklyReport) return;
+  if (!state.reportWeekKey) state.reportWeekKey = currentWeek.key;
+  const weeks = availableWeekInfos();
+  const model = reportModel(state.reportWeekKey);
+  const reportText = weeklyReportText(model);
+
+  els.weeklyReport.innerHTML = `
+    <div class="weekly-report__header">
+      <div>
+        <p class="eyebrow">Отчёт</p>
+        <h2>Итоги недели</h2>
+        <p>Неделя ${model.week.weekNumber} · ${formatHistoryDate(model.week.start)}-${formatHistoryDate(model.week.end)}</p>
+      </div>
+      <label class="week-select">
+        <span>Неделя</span>
+        <select id="reportWeekSelect">
+          ${weeks.map((week) => `
+            <option value="${week.key}" ${week.key === model.week.key ? "selected" : ""}>
+              ${week.key} · ${formatHistoryDate(week.start)}-${formatHistoryDate(week.end)}
+            </option>
+          `).join("")}
+        </select>
+      </label>
+    </div>
+
+    <div class="weekly-report__actions">
+      <button class="report-copy" id="copyWeeklyReport" type="button">Скопировать итоги недели</button>
+      <button class="report-toggle" id="toggleReportText" type="button">
+        ${state.showReportText ? "Скрыть текст отчёта" : "Показать текст отчёта"}
+      </button>
+      <span class="copy-status" id="copyStatus" role="status"></span>
+    </div>
+
+    ${model.hasData ? `
+      <div class="weekly-report__progress">
+        <article><span>Выполнено дней</span><strong>${model.stats.daysDone}/${model.stats.daysTotal}</strong></article>
+        <article><span>Выполнено пунктов</span><strong>${model.stats.done}/${model.stats.total}</strong></article>
+        <article><span>Общий прогресс</span><strong>${model.progressPercent}%</strong></article>
+      </div>
+
+      <section class="weekly-report__section">
+        <h3>Нагрузка по упражнениям</h3>
+        <div class="weekly-report__stats">
+          <span class="is-easy">Легко: <strong>${model.grouped.easy.length}</strong></span>
+          <span class="is-normal">Нормально: <strong>${model.grouped.normal.length}</strong></span>
+          <span class="is-hard">Тяжело: <strong>${model.grouped.hard.length}</strong></span>
+          <span>Не отмечено: <strong>${model.grouped.unrated.length}</strong></span>
+        </div>
+        <div class="weekly-report__lists">
+          <article>
+            <h4>Легко</h4>
+            ${reportList(model.grouped.easy, "Пока нет лёгких упражнений.")}
+          </article>
+          <article>
+            <h4>Нормально</h4>
+            ${reportList(model.grouped.normal, "Пока нет упражнений с нормальной нагрузкой.")}
+          </article>
+          <article>
+            <h4>Тяжело</h4>
+            ${reportList(model.grouped.hard, "Пока нет тяжёлых упражнений.")}
+          </article>
+        </div>
+      </section>
+
+      <section class="weekly-report__section">
+        <h3>Предварительные выводы</h3>
+        <ul>${reportConclusions(model).map((line) => `<li>${line}</li>`).join("")}</ul>
+      </section>
+
+      <section class="weekly-report__section">
+        <h3>Рекомендации по весам</h3>
+        <div class="weekly-report__lists">
+          <article>
+            <h4>Кандидаты на повышение</h4>
+            ${reportList(model.grouped.easy, "Пока нет кандидатов.", recommendationFor)}
+          </article>
+          <article>
+            <h4>Оставить как есть</h4>
+            ${reportList(model.grouped.normal, "Пока нет упражнений.", recommendationFor)}
+          </article>
+          <article>
+            <h4>Проверить / возможно снизить</h4>
+            ${reportList(model.grouped.hard, "Пока нет упражнений.", recommendationFor)}
+          </article>
+        </div>
+      </section>
+    ` : `<div class="empty">На этой неделе пока нет отмеченных упражнений.</div>`}
+
+    <div class="manual-copy ${state.showReportText ? "is-visible" : ""}" id="manualCopy">
+      <label for="reportText">Текст отчёта</label>
+      <textarea id="reportText" readonly>${reportText}</textarea>
+      <p>Если автоматическое копирование недоступно, скопируй текст вручную.</p>
+    </div>
+  `;
+
+  els.weeklyReport.querySelector("#reportWeekSelect")?.addEventListener("change", (event) => {
+    state.reportWeekKey = event.target.value;
+    state.showReportText = false;
+    renderWeeklyReport();
+  });
+  els.weeklyReport.querySelector("#toggleReportText")?.addEventListener("click", () => {
+    state.showReportText = !state.showReportText;
+    renderWeeklyReport();
+  });
+  els.weeklyReport.querySelector("#copyWeeklyReport")?.addEventListener("click", async () => {
+    const status = els.weeklyReport.querySelector("#copyStatus");
+    try {
+      await navigator.clipboard.writeText(reportText);
+      status.textContent = "Итоги недели скопированы";
+    } catch {
+      state.showReportText = true;
+      renderWeeklyReport();
+      els.weeklyReport.querySelector("#reportText")?.focus();
+      els.weeklyReport.querySelector("#reportText")?.select();
+    }
+  });
+}
+
 function updateProgressViews() {
   const day = workouts.find((item) => item.id === state.activeDayId);
   if (!day) return;
@@ -416,6 +756,7 @@ function updateProgressViews() {
 
   renderHistory();
   renderLoadSummary();
+  renderWeeklyReport();
 }
 
 function setCompletion(key, done) {
@@ -995,6 +1336,7 @@ function render() {
   renderDayDetails();
   renderHistory();
   renderLoadSummary();
+  renderWeeklyReport();
 }
 
 els.searchInput.addEventListener("input", (event) => {

@@ -141,6 +141,7 @@ main {
 .legend-card,
 .history-card,
 .load-summary-card,
+.weekly-report-card,
 .day-hero,
 .info-card,
 .fatigue-card,
@@ -388,6 +389,217 @@ main {
 
 .load-summary__note {
   margin: 12px 0 0;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.weekly-report-card {
+  margin: 0 0 22px;
+  padding: 20px;
+}
+
+.weekly-report__header,
+.weekly-report__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.weekly-report__header h2 {
+  margin: 0;
+  font-size: 34px;
+}
+
+.weekly-report__header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.week-select {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.week-select select {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  padding: 8px 12px;
+  font-weight: 800;
+}
+
+.weekly-report__actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+
+.report-copy,
+.report-toggle {
+  min-height: 46px;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-weight: 900;
+}
+
+.report-copy {
+  border: 0;
+  background: var(--ink);
+  color: #fff;
+}
+
+.report-toggle {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+}
+
+.copy-status {
+  color: var(--green);
+  font-weight: 900;
+}
+
+.weekly-report__progress,
+.weekly-report__stats,
+.weekly-report__lists {
+  display: grid;
+  gap: 10px;
+}
+
+.weekly-report__progress {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.weekly-report__progress article,
+.weekly-report__section,
+.weekly-report__lists article {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfcfa;
+}
+
+.weekly-report__progress article {
+  padding: 14px;
+}
+
+.weekly-report__progress span,
+.weekly-report__empty {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.weekly-report__progress strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 28px;
+}
+
+.weekly-report__section {
+  margin-top: 14px;
+  padding: 16px;
+}
+
+.weekly-report__section h3 {
+  margin: 0 0 12px;
+  font-size: 22px;
+}
+
+.weekly-report__stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.weekly-report__stats span {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.weekly-report__stats .is-easy {
+  color: #285f3e;
+  background: #eef7f1;
+}
+
+.weekly-report__stats .is-normal {
+  color: #315172;
+  background: #f2f7fb;
+}
+
+.weekly-report__stats .is-hard {
+  color: #7a3f20;
+  background: #fff3ea;
+}
+
+.weekly-report__lists {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.weekly-report__lists article {
+  padding: 12px;
+}
+
+.weekly-report__lists h4 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.weekly-report__lists ul,
+.weekly-report__section > ul {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.weekly-report__lists li + li,
+.weekly-report__section > ul li + li {
+  margin-top: 6px;
+}
+
+.manual-copy {
+  display: none;
+  margin-top: 14px;
+}
+
+.manual-copy.is-visible {
+  display: grid;
+  gap: 8px;
+}
+
+.manual-copy label {
+  font-weight: 900;
+}
+
+.manual-copy textarea {
+  width: 100%;
+  min-height: 360px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: #fbfcfa;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.manual-copy p {
+  margin: 0;
   color: var(--muted);
   font-weight: 800;
 }
@@ -1416,8 +1628,30 @@ details p {
   .week-grid,
   .history-list,
   .load-summary__grid,
+  .weekly-report__progress,
+  .weekly-report__stats,
+  .weekly-report__lists,
   .info-grid {
     grid-template-columns: 1fr;
+  }
+
+  .weekly-report-card {
+    padding: 14px;
+  }
+
+  .weekly-report__header,
+  .weekly-report__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .weekly-report__header h2 {
+    font-size: 28px;
+  }
+
+  .report-copy,
+  .report-toggle {
+    width: 100%;
   }
 
   .day-card {
