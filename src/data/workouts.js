@@ -390,7 +390,7 @@ export const workouts = [
       exercise({
         id: "chest-press",
         title: "Жим от груди в тренажёре",
-        image: "",
+        image: img("chest-press-machine", "png"),
         sets: "3 x 10-12",
         weight: weightGuide({
           start: "35 кг",
@@ -891,7 +891,7 @@ export const workouts = [
       exercise({
         id: "triceps-pushdown",
         title: "Разгибание рук на верхнем блоке",
-        image: img("triceps-pushdown"),
+        image: img("triceps_cable_pushdown", "png"),
         sets: "3 x 10-12",
         weight: weightGuide({
           start: "15 кг",
@@ -910,7 +910,7 @@ export const workouts = [
       exercise({
         id: "hammer-curl",
         title: "Молотковые сгибания",
-        image: img("hammer-curl"),
+        image: img("hammer_curls", "png"),
         sets: "3 x 10-12",
         weight: weightGuide({
           start: "7 кг / рука",
@@ -967,7 +967,7 @@ export const workouts = [
       exercise({
         id: "close-grip-push-up",
         title: "Отжимания узким хватом",
-        image: img("close-grip-push-up"),
+        image: img("close_grip_pushups", "png"),
         sets: "2-3 x 6-12",
         weight: weightGuide({
           start: "Без веса",
