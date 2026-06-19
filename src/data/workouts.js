@@ -9,7 +9,7 @@ export const filters = [
   "Восстановление",
 ];
 
-const img = (name) => `assets/exercises/${name}.jpg`;
+const img = (name, extension = "jpg") => `assets/exercises/${name}.${extension}`;
 const weightGuide = ({ start = "уточнить", range = "", hint = "" }) => ({ start, range, hint });
 
 const common = {
@@ -125,7 +125,7 @@ export const workouts = [
       exercise({
         id: "leg-press",
         title: "Жим ногами",
-        image: img("leg-press"),
+        image: img("leg-press", "png"),
         sets: "3 x 10-12",
         weight: weightGuide({
           start: "60 кг",
@@ -144,7 +144,7 @@ export const workouts = [
       exercise({
         id: "leg-extension",
         title: "Разгибание ног",
-        image: img("leg-extension"),
+        image: img("leg-extension", "png"),
         sets: "3 x 12-15",
         weight: weightGuide({
           start: "25 кг",
@@ -163,7 +163,7 @@ export const workouts = [
       exercise({
         id: "lying-leg-curl",
         title: "Сгибание ног лёжа",
-        image: img("lying-leg-curl"),
+        image: img("lying-leg-curl", "png"),
         sets: "3 x 10-12",
         weight: weightGuide({
           start: "20 кг",
@@ -352,7 +352,7 @@ export const workouts = [
       exercise({
         id: "lat-pulldown",
         title: "Тяга верхнего блока к груди",
-        image: "",
+        image: img("lat-pulldown", "png"),
         sets: "3 x 10-12",
         weight: weightGuide({
           start: "40 кг",
@@ -371,7 +371,7 @@ export const workouts = [
       exercise({
         id: "seated-row",
         title: "Горизонтальная тяга сидя",
-        image: img("seated-row"),
+        image: img("seated-cable-row", "png"),
         sets: "3 x 10-12",
         weight: weightGuide({
           start: "35 кг",
@@ -390,7 +390,7 @@ export const workouts = [
       exercise({
         id: "chest-press",
         title: "Жим от груди в тренажёре",
-        image: img("chest-press"),
+        image: "",
         sets: "3 x 10-12",
         weight: weightGuide({
           start: "35 кг",
@@ -409,7 +409,7 @@ export const workouts = [
       exercise({
         id: "straight-arm-pulldown",
         title: "Тяга прямыми руками на верхнем блоке",
-        image: "",
+        image: img("straight-arm-pul1down", "png"),
         sets: "3 x 12-15",
         weight: weightGuide({
           start: "12,5 кг",
@@ -514,7 +514,7 @@ export const workouts = [
       exercise({
         id: "plank",
         title: "Планка",
-        image: img("plank"),
+        image: img("plank", "png"),
         sets: "2-3 x 20-40 сек",
         weight: "Без веса",
         rpe: "RPE 5-6",
@@ -529,7 +529,7 @@ export const workouts = [
       exercise({
         id: "side-plank",
         title: "Боковая планка",
-        image: img("side-plank"),
+        image: img("side-plank", "png"),
         sets: "2-3 x 15-30 сек на сторону",
         weight: "Без веса",
         rpe: "RPE 5-6",
@@ -544,7 +544,7 @@ export const workouts = [
       exercise({
         id: "crunches",
         title: "Скручивания",
-        image: img("crunches"),
+        image: img("crunches", "png"),
         sets: "2-3 x 12-15",
         weight: "Без веса",
         rpe: "RPE 5",
@@ -559,7 +559,7 @@ export const workouts = [
       exercise({
         id: "leg-raise",
         title: "Подъём ног лёжа",
-        image: img("leg-raise"),
+        image: img("lying-leg-raise", "png"),
         sets: "2-3 x 8-12",
         weight: "Без веса",
         rpe: "RPE 5-6",
@@ -593,7 +593,7 @@ export const workouts = [
       exercise({
         id: "dead-bug",
         title: "Dead bug",
-        image: img("dead-bug"),
+        image: img("dead-bug", "png"),
         sets: "2-3 x 6-10 на сторону",
         weight: "Без веса",
         rpe: "RPE 4-5",
@@ -608,7 +608,7 @@ export const workouts = [
       exercise({
         id: "superman",
         title: "Гиперэкстензия на полу / лодочка",
-        image: img("superman"),
+        image: img("floor-hyperextension-boat", "png"),
         sets: "2-3 x 8-12",
         weight: "Без веса",
         rpe: "RPE 4-5",
@@ -623,7 +623,7 @@ export const workouts = [
       exercise({
         id: "bird-dog",
         title: "Птица-собака",
-        image: img("bird-dog"),
+        image: img("bird-dog", "png"),
         sets: "2-3 x 6-10 на сторону",
         weight: "Без веса",
         rpe: "RPE 4-5",
@@ -815,7 +815,7 @@ export const workouts = [
       exercise({
         id: "shoulder-press",
         title: "Жим гантелей над головой",
-        image: img("shoulder-press"),
+        image: img("dumbbell-shoulder-press", "png"),
         sets: "3 x 8-10",
         weight: weightGuide({
           start: "8 кг / рука",
@@ -834,7 +834,7 @@ export const workouts = [
       exercise({
         id: "lateral-raise",
         title: "Подъём гантелей через стороны",
-        image: img("lateral-raise"),
+        image: img("dumbbell-lateral-raise", "png"),
         sets: "3 x 12-15",
         weight: weightGuide({
           start: "5 кг / рука",
@@ -872,7 +872,7 @@ export const workouts = [
       exercise({
         id: "biceps-curl",
         title: "Сгибание рук на бицепс",
-        image: img("biceps-curl"),
+        image: img("dumbbell-biceps-curl", "png"),
         sets: "3 x 10-12",
         weight: weightGuide({
           start: "8 кг / рука",
@@ -929,7 +929,7 @@ export const workouts = [
       exercise({
         id: "biceps-curl-machine",
         title: "Сгибание рук в тренажёре / на скамье Скотта",
-        image: img("biceps-curl-machine"),
+        image: img("machine-biceps-curl", "png"),
         sets: "2-3 x 10-12",
         weight: weightGuide({
           start: "15 кг",
