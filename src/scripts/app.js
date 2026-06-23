@@ -14,9 +14,14 @@ const currentWeek = getCurrentWeekInfo();
 const progressStorageKey = `workout-progress-${currentWeek.key}`;
 const notesStorageKey = `workout-notes-${currentWeek.key}`;
 const exerciseResultsStorageKey = "workout-exercise-results:v2";
+const authLinkCooldownStorageKey = "workout-sync-auth-link-cooldown-until:v1";
+const authLinkCooldownMs = 60 * 1000;
 const saved = loadSaved();
 const exerciseResults = loadExerciseResults();
 let cloudSync = null;
+let authLinkSubmitting = false;
+let authLinkCooldownTimer = null;
+let lastCloudSyncPayload = null;
 migrateWeeklyResults();
 const baseUrl = import.meta.env.BASE_URL;
 
@@ -1613,7 +1618,9 @@ function renderLists() {
 
 function renderCloudSyncStatus({ configured, status, message, user, online, diagnostics }) {
   if (!els.cloudSync) return;
+  lastCloudSyncPayload = { configured, status, message, user, online, diagnostics };
   const signedIn = Boolean(user);
+  const cooldownSeconds = authLinkCooldownSeconds();
   const statusText = message || {
     unconfigured: "Нужно добавить настройки Supabase",
     "signed-out": "Войдите, чтобы синхронизировать устройства",
@@ -1623,15 +1630,26 @@ function renderCloudSyncStatus({ configured, status, message, user, online, diag
     offline: "Офлайн: изменения сохраняются на устройстве",
     error: "Ошибка синхронизации",
     "email-sent": "Ссылка для входа отправлена",
+    "email-sending": "Отправляем ссылку...",
   }[status] || "";
+  const authStatusText = authLinkSubmitting
+    ? "Отправляем ссылку..."
+    : `Ссылка отправлена. Проверьте почту. Повторно можно запросить через ${cooldownSeconds} сек.`;
 
   els.cloudSync.dataset.status = status;
-  els.cloudSync.querySelector(".cloud-sync__status").textContent = statusText;
+  els.cloudSync.querySelector(".cloud-sync__status").textContent =
+    !signedIn && configured && cooldownSeconds > 0 && status !== "error" ? authStatusText : statusText;
   els.cloudSync.querySelector(".cloud-sync__account").textContent = signedIn ? user.email : "";
   els.cloudSync.querySelector(".cloud-sync__login").hidden = signedIn || !configured;
   els.cloudSync.querySelector(".cloud-sync__session").hidden = !signedIn;
   els.cloudSync.querySelector(".cloud-sync__setup").hidden = configured;
   els.cloudSync.querySelector("[data-sync-now]").disabled = !online || status === "syncing";
+  const loginButton = els.cloudSync.querySelector(".cloud-sync__login button");
+  if (loginButton) {
+    const disabled = authLinkSubmitting || cooldownSeconds > 0 || !online;
+    loginButton.disabled = disabled;
+    loginButton.textContent = cooldownSeconds > 0 ? `Повтор через ${cooldownSeconds} сек` : "Получить ссылку";
+  }
   const diagnosticsNode = els.cloudSync.querySelector(".cloud-sync__diagnostics");
   const showDiagnostics = Boolean(diagnostics?.requestUrl || diagnostics?.response);
   diagnosticsNode.hidden = !showDiagnostics;
@@ -1646,8 +1664,35 @@ function renderCloudSyncStatus({ configured, status, message, user, online, diag
     Object.entries(values).forEach(([key, value]) => {
       diagnosticsNode.querySelector(`[data-diagnostic="${key}"]`).textContent = value;
     });
-    if (status === "error") diagnosticsNode.open = true;
   }
+  scheduleAuthLinkCooldownRender();
+}
+
+function authLinkCooldownSeconds() {
+  const cooldownUntil = Number(localStorage.getItem(authLinkCooldownStorageKey) || 0);
+  return Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
+}
+
+function startAuthLinkCooldown() {
+  localStorage.setItem(authLinkCooldownStorageKey, String(Date.now() + authLinkCooldownMs));
+  scheduleAuthLinkCooldownRender();
+}
+
+function scheduleAuthLinkCooldownRender() {
+  window.clearTimeout(authLinkCooldownTimer);
+  if (authLinkCooldownSeconds() <= 0 || !lastCloudSyncPayload) return;
+  authLinkCooldownTimer = window.setTimeout(() => renderCloudSyncStatus(lastCloudSyncPayload), 1000);
+}
+
+function cloudAuthErrorMessage(error) {
+  const responseCode = error?.code || error?.error_code || error?.diagnostics?.code || "";
+  if (responseCode === "over_email_send_rate_limit") {
+    return "Слишком много запросов письма. Подождите 10–20 минут и попробуйте снова.";
+  }
+  if (responseCode === "email_address_invalid") {
+    return "Проверьте адрес почты и попробуйте ещё раз.";
+  }
+  return "Не удалось отправить ссылку. Попробуйте позже.";
 }
 
 function initCloudSync() {
@@ -1661,22 +1706,29 @@ function initCloudSync() {
     event.preventDefault();
     const form = event.currentTarget;
     const email = form.elements.email.value.trim();
-    if (!email) return;
-    const button = form.querySelector("button");
-    button.disabled = true;
+    if (!email || authLinkSubmitting || authLinkCooldownSeconds() > 0) return;
+    authLinkSubmitting = true;
+    startAuthLinkCooldown();
+    renderCloudSyncStatus({
+      configured: cloudSync.configured,
+      status: "email-sending",
+      user: null,
+      online: navigator.onLine,
+    });
     try {
       await cloudSync.signIn(email);
     } catch (error) {
       renderCloudSyncStatus({
         configured: cloudSync.configured,
         status: "error",
-        message: error.message,
+        message: cloudAuthErrorMessage(error),
         user: null,
         online: navigator.onLine,
         diagnostics: error.diagnostics,
       });
     } finally {
-      button.disabled = false;
+      authLinkSubmitting = false;
+      if (lastCloudSyncPayload) renderCloudSyncStatus(lastCloudSyncPayload);
     }
   });
 
