@@ -1611,7 +1611,7 @@ function renderLists() {
   els.progressionList.innerHTML = progression.map((item) => `<li>${item}</li>`).join("");
 }
 
-function renderCloudSyncStatus({ configured, status, message, user, online }) {
+function renderCloudSyncStatus({ configured, status, message, user, online, diagnostics }) {
   if (!els.cloudSync) return;
   const signedIn = Boolean(user);
   const statusText = message || {
@@ -1632,6 +1632,22 @@ function renderCloudSyncStatus({ configured, status, message, user, online }) {
   els.cloudSync.querySelector(".cloud-sync__session").hidden = !signedIn;
   els.cloudSync.querySelector(".cloud-sync__setup").hidden = configured;
   els.cloudSync.querySelector("[data-sync-now]").disabled = !online || status === "syncing";
+  const diagnosticsNode = els.cloudSync.querySelector(".cloud-sync__diagnostics");
+  const showDiagnostics = Boolean(diagnostics?.requestUrl || diagnostics?.response);
+  diagnosticsNode.hidden = !showDiagnostics;
+  if (showDiagnostics) {
+    const values = {
+      "supabase-url": diagnostics.supabaseUrl || "—",
+      "request-url": diagnostics.requestUrl || "—",
+      status: diagnostics.status || "—",
+      code: diagnostics.code || "—",
+      response: diagnostics.response || "—",
+    };
+    Object.entries(values).forEach(([key, value]) => {
+      diagnosticsNode.querySelector(`[data-diagnostic="${key}"]`).textContent = value;
+    });
+    if (status === "error") diagnosticsNode.open = true;
+  }
 }
 
 function initCloudSync() {
@@ -1657,6 +1673,7 @@ function initCloudSync() {
         message: error.message,
         user: null,
         online: navigator.onLine,
+        diagnostics: error.diagnostics,
       });
     } finally {
       button.disabled = false;
@@ -1674,6 +1691,7 @@ function initCloudSync() {
         message: error.message,
         user: null,
         online: navigator.onLine,
+        diagnostics: error.diagnostics,
       });
     }
   });

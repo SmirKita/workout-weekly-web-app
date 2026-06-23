@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 const META_KEY = "workout-sync-meta:v1";
 const OUTBOX_KEY = "workout-sync-outbox:v1";
 const IMPORTED_USERS_KEY = "workout-sync-imported-users:v1";
+const UPSERT_RPC_NAME = "upsert_workout_sync_record";
 const SYNCABLE_KEY = /^(workout-progress-\d{4}-W\d{2}|workout-notes-\d{4}-W\d{2}|workout-exercise-results:v2)$/;
 
 function loadJson(key, fallback) {
@@ -70,12 +71,72 @@ function compareDates(left, right) {
   return new Date(left || 0).getTime() - new Date(right || 0).getTime();
 }
 
+function stripWrappingQuotes(value) {
+  return String(value || "").trim().replace(/^(["'])(.*)\1$/, "$2").trim();
+}
+
+function normalizeSupabaseUrl(value) {
+  const parsed = new URL(stripWrappingQuotes(value));
+  if (parsed.protocol !== "https:") throw new Error("Supabase URL должен использовать HTTPS");
+  if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
+    throw new Error("Supabase URL должен содержать только адрес проекта без дополнительного пути");
+  }
+  return parsed.origin;
+}
+
+function safeResponseText(value) {
+  return String(value || "")
+    .replace(/sb_(?:publishable|secret)_[A-Za-z0-9_-]+/g, "[скрыто]")
+    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[скрыто]")
+    .slice(0, 1200);
+}
+
 export function createWorkoutCloudSync({ onStatus, onRemoteApplied } = {}) {
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
-  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
-  const configured = Boolean(supabaseUrl && supabaseAnonKey);
+  const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = stripWrappingQuotes(import.meta.env.VITE_SUPABASE_ANON_KEY);
+  let supabaseUrl = "";
+  let configurationError = "";
+  try {
+    if (rawSupabaseUrl) supabaseUrl = normalizeSupabaseUrl(rawSupabaseUrl);
+  } catch (error) {
+    configurationError = error.message;
+  }
+  const configured = Boolean(supabaseUrl && supabaseAnonKey && !configurationError);
+  let lastRequest = null;
+  const diagnosticFetch = async (input, init) => {
+    const requestUrl = typeof input === "string" ? input : input.url;
+    try {
+      const response = await fetch(input, init);
+      const responseText = safeResponseText(await response.clone().text());
+      let responseCode = "";
+      try {
+        const body = JSON.parse(responseText);
+        responseCode = body.code || body.error_code || "";
+      } catch {
+        responseCode = "";
+      }
+      lastRequest = {
+        supabaseUrl,
+        requestUrl,
+        status: response.status,
+        code: responseCode,
+        response: responseText,
+      };
+      return response;
+    } catch (error) {
+      lastRequest = {
+        supabaseUrl,
+        requestUrl,
+        status: 0,
+        code: error.name || "network_error",
+        response: safeResponseText(error.message),
+      };
+      throw error;
+    }
+  };
   const client = configured
     ? createClient(supabaseUrl, supabaseAnonKey, {
+      global: { fetch: diagnosticFetch },
       auth: {
         persistSession: true,
         autoRefreshToken: true,
@@ -95,6 +156,13 @@ export function createWorkoutCloudSync({ onStatus, onRemoteApplied } = {}) {
     message,
     user,
     online: navigator.onLine,
+    diagnostics: lastRequest || {
+      supabaseUrl: supabaseUrl || stripWrappingQuotes(rawSupabaseUrl),
+      requestUrl: "",
+      status: "",
+      code: configurationError ? "invalid_supabase_url" : "",
+      response: configurationError,
+    },
   });
 
   function markLocalChange(recordKey, payload, updatedAt = new Date().toISOString()) {
@@ -124,7 +192,7 @@ export function createWorkoutCloudSync({ onStatus, onRemoteApplied } = {}) {
   }
 
   async function pushRecord(record) {
-    const { error } = await client.rpc("upsert_workout_sync_record", {
+    const { error } = await client.rpc(UPSERT_RPC_NAME, {
       p_record_key: record.recordKey,
       p_payload: record.payload,
       p_client_updated_at: record.updatedAt,
@@ -193,7 +261,10 @@ export function createWorkoutCloudSync({ onStatus, onRemoteApplied } = {}) {
       if (appliedKeys.length) onRemoteApplied?.(appliedKeys);
       report("synced", `Синхронизировано ${new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`);
     } catch (error) {
-      console.error("Workout cloud sync failed", error);
+      console.error("Workout cloud sync failed", {
+        message: error.message,
+        diagnostics: lastRequest,
+      });
       report("error", error.message || "Не удалось синхронизировать данные");
     } finally {
       syncing = false;
@@ -210,21 +281,30 @@ export function createWorkoutCloudSync({ onStatus, onRemoteApplied } = {}) {
     const redirectTo = new URL(import.meta.env.BASE_URL, window.location.origin).href;
     const { error } = await client.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: redirectTo },
+      options: {
+        emailRedirectTo: redirectTo,
+        shouldCreateUser: true,
+      },
     });
-    if (error) throw error;
+    if (error) {
+      error.diagnostics = lastRequest;
+      throw error;
+    }
     report("email-sent", "Ссылка для входа отправлена на почту");
   }
 
   async function signOut() {
     if (!client) return;
     const { error } = await client.auth.signOut();
-    if (error) throw error;
+    if (error) {
+      error.diagnostics = lastRequest;
+      throw error;
+    }
   }
 
   async function init() {
     if (!configured) {
-      report("unconfigured", "Облачная синхронизация не настроена");
+      report("unconfigured", configurationError || "Облачная синхронизация не настроена");
       return;
     }
     const { data } = await client.auth.getSession();

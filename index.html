@@ -60,6 +60,16 @@
         <p class="cloud-sync__setup" hidden>
           Добавьте <code>VITE_SUPABASE_URL</code> и <code>VITE_SUPABASE_ANON_KEY</code>, чтобы включить облако.
         </p>
+        <details class="cloud-sync__diagnostics" hidden>
+          <summary>Диагностика синхронизации</summary>
+          <dl>
+            <div><dt>Supabase URL</dt><dd data-diagnostic="supabase-url"></dd></div>
+            <div><dt>Запрос</dt><dd data-diagnostic="request-url"></dd></div>
+            <div><dt>HTTP</dt><dd data-diagnostic="status"></dd></div>
+            <div><dt>Код</dt><dd data-diagnostic="code"></dd></div>
+            <div><dt>Ответ</dt><dd data-diagnostic="response"></dd></div>
+          </dl>
+        </details>
       </section>
 
       <section class="panel" id="search">

@@ -172,6 +172,7 @@ main {
   margin-top: 16px;
   padding: 14px 16px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
 }
@@ -227,6 +228,41 @@ main {
 .cloud-sync__setup {
   margin: 0 0 0 auto;
   color: var(--muted);
+}
+
+.cloud-sync__diagnostics {
+  width: 100%;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.cloud-sync__diagnostics summary {
+  font-size: 13px;
+}
+
+.cloud-sync__diagnostics dl {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+
+.cloud-sync__diagnostics dl div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.cloud-sync__diagnostics dt {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.cloud-sync__diagnostics dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
 }
 
 .cloud-sync-card[data-status="synced"] {
@@ -1778,9 +1814,15 @@ details p {
 
   .cloud-sync__login,
   .cloud-sync__session,
-  .cloud-sync__setup {
+  .cloud-sync__setup,
+  .cloud-sync__diagnostics {
     width: 100%;
     margin-left: 0;
+  }
+
+  .cloud-sync__diagnostics dl div {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
 
   .cloud-sync__login {
