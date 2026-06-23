@@ -12,7 +12,10 @@ const state = {
 const currentWeek = getCurrentWeekInfo();
 const progressStorageKey = `workout-progress-${currentWeek.key}`;
 const notesStorageKey = `workout-notes-${currentWeek.key}`;
+const exerciseResultsStorageKey = "workout-exercise-results:v2";
 const saved = loadSaved();
+const exerciseResults = loadExerciseResults();
+migrateWeeklyResults();
 const baseUrl = import.meta.env.BASE_URL;
 
 const els = {
@@ -119,6 +122,7 @@ function emptyProgress() {
     exercises: {},
     feedback: {},
     fatigue: {},
+    workingWeights: {},
   };
 }
 
@@ -159,12 +163,89 @@ function loadSaved() {
   };
 }
 
+function loadExerciseResults() {
+  const stored = loadJson(exerciseResultsStorageKey, null);
+  return stored || {
+    version: 2,
+    exercises: {},
+  };
+}
+
+function persistExerciseResults() {
+  localStorage.setItem(exerciseResultsStorageKey, JSON.stringify(exerciseResults));
+}
+
+function exerciseById(exerciseId) {
+  return workouts.flatMap((day) => day.exercises).find((exercise) => exercise.id === exerciseId);
+}
+
+function dayForExercise(exerciseId) {
+  return workouts.find((day) => day.exercises.some((exercise) => exercise.id === exerciseId));
+}
+
+function resultForExercise(exerciseId) {
+  if (!exerciseResults.exercises[exerciseId]) {
+    exerciseResults.exercises[exerciseId] = {
+      workingWeight: weightText(exerciseById(exerciseId)?.weight),
+      history: [],
+    };
+  }
+  return exerciseResults.exercises[exerciseId];
+}
+
+function resultDateForWeek(weekKey, progress) {
+  if (progress.updatedAt) return progress.updatedAt;
+  const week = getWeekInfoFromKey(weekKey);
+  const date = new Date(week.end);
+  date.setHours(12, 0, 0, 0);
+  return date.toISOString();
+}
+
+function migrateWeeklyResults() {
+  let changed = false;
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    const match = /^workout-progress-(\d{4}-W\d{2})$/.exec(key || "");
+    if (!match) continue;
+    const weekKey = match[1];
+    const progress = loadJson(key, emptyProgress());
+    Object.entries(progress.feedback || {}).forEach(([exerciseId, feedback]) => {
+      if (!exerciseById(exerciseId)) return;
+      const result = resultForExercise(exerciseId);
+      if (result.history.some((entry) => entry.weekKey === weekKey)) return;
+      const weight = progress.workingWeights?.[exerciseId] || weightText(exerciseById(exerciseId).weight);
+      result.history.push({
+        date: resultDateForWeek(weekKey, progress),
+        weekKey,
+        dayId: dayForExercise(exerciseId)?.id || "",
+        weight,
+        feedback,
+      });
+      result.workingWeight = weight;
+      changed = true;
+    });
+  }
+
+  if (changed) {
+    Object.values(exerciseResults.exercises).forEach((result) => {
+      result.history.sort((a, b) => new Date(a.date) - new Date(b.date));
+      const latest = result.history[result.history.length - 1];
+      if (latest) {
+        result.workingWeight = latest.weight;
+        result.latestFeedback = latest.feedback;
+      }
+    });
+    persistExerciseResults();
+  }
+}
+
 function persist() {
   localStorage.setItem(progressStorageKey, JSON.stringify({
     days: saved.days,
     exercises: saved.exercises,
     feedback: saved.feedback || {},
     fatigue: saved.fatigue || {},
+    workingWeights: saved.workingWeights || {},
     updatedAt: new Date().toISOString(),
   }));
   localStorage.setItem(notesStorageKey, JSON.stringify(saved.notes || {}));
@@ -177,6 +258,15 @@ function todayWorkoutId() {
 
 function normalize(value) {
   return String(value).toLowerCase().replaceAll("ё", "е");
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function assetPath(path) {
@@ -284,12 +374,18 @@ function weightText(weight) {
   return weight.start || "уточнить";
 }
 
-function mainExerciseEntries(source) {
+function weightForSource(exercise, source, usePersistentFallback = false) {
+  return source.workingWeights?.[exercise.id]
+    || (usePersistentFallback ? resultForExercise(exercise.id).workingWeight : "")
+    || weightText(exercise.weight);
+}
+
+function mainExerciseEntries(source, usePersistentFallback = false) {
   return workouts.flatMap((day) =>
     day.exercises.map((exercise) => ({
       day,
       exercise,
-      weight: weightText(exercise.weight),
+      weight: weightForSource(exercise, source, usePersistentFallback),
       feedback: source.feedback?.[exercise.id] || "",
       done: Boolean(source.exercises?.[exercise.id]),
     })),
@@ -328,7 +424,7 @@ function reportModel(weekKey) {
   const week = getWeekInfoFromKey(weekKey);
   const source = savedForWeek(week.key);
   const stats = statsForSaved(source);
-  const entries = mainExerciseEntries(source);
+  const entries = mainExerciseEntries(source, week.key === currentWeek.key);
   const grouped = {
     easy: entries.filter((entry) => entry.feedback === "easy"),
     normal: entries.filter((entry) => entry.feedback === "normal"),
@@ -535,7 +631,8 @@ function weeklyReportText(model) {
     lines.push(`Общая усталость: ${fatigueReportLabels[model.source.fatigue?.[day.id]] || "не отмечено"}`);
     lines.push("", "Основная часть:");
     dayEntries.forEach((exercise) => {
-      lines.push(`— ${exercise.title} — ${weightText(exercise.weight)} — ${effortReportLabels[model.source.feedback?.[exercise.id]] || "не отмечено"}`);
+      const entry = model.entries.find((item) => item.exercise.id === exercise.id);
+      lines.push(`— ${exercise.title} — ${entry?.weight || weightText(exercise.weight)} — ${effortReportLabels[model.source.feedback?.[exercise.id]] || "не отмечено"}`);
     });
   });
 
@@ -759,11 +856,30 @@ function updateProgressViews() {
   renderWeeklyReport();
 }
 
-function setCompletion(key, done) {
+function restoreViewport(anchor, anchorTop, scrollX, scrollY, focusedElement) {
+  requestAnimationFrame(() => {
+    if (anchor?.isConnected && Number.isFinite(anchorTop)) {
+      const delta = anchor.getBoundingClientRect().top - anchorTop;
+      if (Math.abs(delta) > 0.5) window.scrollBy({ top: delta, left: 0, behavior: "auto" });
+    } else {
+      window.scrollTo({ top: scrollY, left: scrollX, behavior: "auto" });
+    }
+    if (focusedElement?.isConnected && typeof focusedElement.focus === "function") {
+      focusedElement.focus({ preventScroll: true });
+    }
+  });
+}
+
+function setCompletion(key, done, anchor = null) {
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  const anchorTop = anchor?.getBoundingClientRect().top;
+  const focusedElement = document.activeElement;
   saved.exercises[key] = done;
   syncAllDayCompletion();
   persist();
   updateProgressViews();
+  restoreViewport(anchor, anchorTop, scrollX, scrollY, focusedElement);
 }
 
 function setDayCompletion(day, done) {
@@ -775,16 +891,85 @@ function setDayCompletion(day, done) {
   render();
 }
 
-function setExerciseFeedback(exerciseId, value) {
-  saved.feedback[exerciseId] = value;
-  persist();
-  renderLoadSummary();
+function workingWeightFor(exerciseId) {
+  return saved.workingWeights?.[exerciseId]
+    || resultForExercise(exerciseId).workingWeight
+    || weightText(exerciseById(exerciseId)?.weight);
 }
 
-function setDayFatigue(dayId, value) {
+function previousResultFor(exerciseId) {
+  const history = resultForExercise(exerciseId).history || [];
+  const previous = [...history]
+    .filter((entry) => entry.weekKey !== currentWeek.key)
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  return previous[0] || null;
+}
+
+function recommendationFromFeedback(feedback) {
+  if (feedback === "easy") return "Можно немного увеличить вес, если техника чистая.";
+  if (feedback === "normal") return "Оставить текущий вес.";
+  if (feedback === "hard") return "Оставить или немного уменьшить вес.";
+  return "После упражнения отметь нагрузку, чтобы получить рекомендацию.";
+}
+
+function saveExerciseResult(exerciseId, feedback) {
+  const result = resultForExercise(exerciseId);
+  const weight = workingWeightFor(exerciseId);
+  const day = dayForExercise(exerciseId);
+  const existing = result.history.find((entry) => entry.weekKey === currentWeek.key);
+  const entry = {
+    date: new Date().toISOString(),
+    weekKey: currentWeek.key,
+    dayId: day?.id || "",
+    weight,
+    feedback,
+  };
+  if (existing) Object.assign(existing, entry);
+  else result.history.push(entry);
+  result.workingWeight = weight;
+  result.latestFeedback = feedback;
+  result.history.sort((a, b) => new Date(a.date) - new Date(b.date));
+  persistExerciseResults();
+}
+
+function setExerciseWeight(exerciseId, weight) {
+  const normalizedWeight = weight.trim() || weightText(exerciseById(exerciseId)?.weight);
+  saved.workingWeights[exerciseId] = normalizedWeight;
+  const result = resultForExercise(exerciseId);
+  result.workingWeight = normalizedWeight;
+  const currentEntry = result.history.find((entry) => entry.weekKey === currentWeek.key);
+  if (currentEntry) {
+    currentEntry.weight = normalizedWeight;
+    currentEntry.date = new Date().toISOString();
+  }
+  persist();
+  persistExerciseResults();
+}
+
+function setExerciseFeedback(exerciseId, value, anchor = null) {
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  const anchorTop = anchor?.getBoundingClientRect().top;
+  const focusedElement = document.activeElement;
+  saved.feedback[exerciseId] = value;
+  if (!saved.workingWeights[exerciseId]) saved.workingWeights[exerciseId] = workingWeightFor(exerciseId);
+  saveExerciseResult(exerciseId, value);
+  persist();
+  renderLoadSummary();
+  renderWeeklyReport();
+  restoreViewport(anchor, anchorTop, scrollX, scrollY, focusedElement);
+}
+
+function setDayFatigue(dayId, value, anchor = null) {
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  const anchorTop = anchor?.getBoundingClientRect().top;
+  const focusedElement = document.activeElement;
   saved.fatigue[dayId] = value;
   persist();
   renderLoadSummary();
+  renderWeeklyReport();
+  restoreViewport(anchor, anchorTop, scrollX, scrollY, focusedElement);
 }
 
 function shouldIgnoreToggle(event) {
@@ -1065,7 +1250,7 @@ function renderDayDetails() {
   els.dayDetails.querySelectorAll("[data-fatigue]").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      setDayFatigue(day.id, button.dataset.fatigue);
+      setDayFatigue(day.id, button.dataset.fatigue, els.dayDetails.querySelector("#fatigueCard"));
       els.dayDetails.querySelectorAll("[data-fatigue]").forEach((item) => {
         const selected = item.dataset.fatigue === button.dataset.fatigue;
         item.classList.toggle("is-selected", selected);
@@ -1177,7 +1362,7 @@ function renderRoutineSection(section) {
     };
     const toggleRoutine = () => {
       const done = !saved.exercises[key];
-      setCompletion(key, done);
+      setCompletion(key, done, row);
       applyRoutineState(done);
     };
     row.addEventListener("click", (event) => {
@@ -1213,7 +1398,7 @@ function renderExercise(item, order) {
   };
   const toggleExercise = () => {
     const done = !saved.exercises[item.id];
-    setCompletion(item.id, done);
+    setCompletion(item.id, done, node);
     applyExerciseState(done);
   };
   applyExerciseState(Boolean(saved.exercises[item.id]));
@@ -1232,6 +1417,62 @@ function renderExercise(item, order) {
   });
 
   const feedbackButtons = node.querySelector(".feedback-buttons");
+  const resultPanel = document.createElement("div");
+  resultPanel.className = "exercise-result-panel";
+  node.querySelector(".exercise-card__actions").insertBefore(resultPanel, node.querySelector(".effort-feedback"));
+
+  const renderResultPanel = () => {
+    const previous = previousResultFor(item.id);
+    const result = resultForExercise(item.id);
+    const currentFeedback = saved.feedback?.[item.id] || "";
+    const recommendationFeedback = currentFeedback || previous?.feedback || "";
+    const history = [...(result.history || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
+    resultPanel.innerHTML = `
+      <label class="working-weight">
+        <span>Рабочий вес</span>
+        <input
+          type="text"
+          inputmode="decimal"
+          value="${escapeHtml(workingWeightFor(item.id))}"
+          aria-label="Рабочий вес: ${escapeHtml(item.title)}"
+        />
+      </label>
+      <p class="previous-result">
+        <strong>Прошлый результат:</strong>
+        ${
+          previous
+            ? `${escapeHtml(previous.weight)} · ${escapeHtml(effortReportLabels[previous.feedback] || "не отмечено")}`
+            : "пока нет данных"
+        }
+      </p>
+      <p class="exercise-recommendation">${escapeHtml(recommendationFromFeedback(recommendationFeedback))}</p>
+      <details class="exercise-history">
+        <summary>История упражнения (${history.length})</summary>
+        ${
+          history.length
+            ? `<ul>${history.map((entry) => `
+                <li>
+                  <time datetime="${escapeHtml(entry.date)}">${new Date(entry.date).toLocaleDateString("ru-RU")}</time>
+                  <span>${escapeHtml(entry.weight)}</span>
+                  <strong>${escapeHtml(effortReportLabels[entry.feedback] || "не отмечено")}</strong>
+                </li>
+              `).join("")}</ul>`
+            : `<p>История появится после первой оценки нагрузки.</p>`
+        }
+      </details>
+    `;
+    const weightInput = resultPanel.querySelector("input");
+    weightInput.addEventListener("click", (event) => event.stopPropagation());
+    weightInput.addEventListener("keydown", (event) => event.stopPropagation());
+    weightInput.addEventListener("input", (event) => {
+      event.stopPropagation();
+      setExerciseWeight(item.id, event.target.value);
+    });
+    resultPanel.querySelector("details").addEventListener("click", (event) => event.stopPropagation());
+    resultPanel.querySelector("details").addEventListener("keydown", (event) => event.stopPropagation());
+  };
+  renderResultPanel();
+
   feedbackButtons.innerHTML = Object.entries(effortOptions).map(([value, label]) => `
     <button
       class="effort-button is-${value} ${saved.feedback?.[item.id] === value ? "is-selected" : ""}"
@@ -1245,12 +1486,13 @@ function renderExercise(item, order) {
   feedbackButtons.querySelectorAll("[data-effort]").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      setExerciseFeedback(item.id, button.dataset.effort);
+      setExerciseFeedback(item.id, button.dataset.effort, node);
       feedbackButtons.querySelectorAll("[data-effort]").forEach((option) => {
         const selected = option.dataset.effort === button.dataset.effort;
         option.classList.toggle("is-selected", selected);
         option.setAttribute("aria-pressed", String(selected));
       });
+      renderResultPanel();
     });
   });
 

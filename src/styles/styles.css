@@ -855,6 +855,13 @@ p {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #fff;
+  overflow-anchor: none;
+}
+
+.history-card,
+.load-summary-card,
+.weekly-report-card {
+  overflow-anchor: none;
 }
 
 .progress-card {
@@ -1261,6 +1268,80 @@ p {
   padding: 0 18px 18px;
   display: grid;
   gap: 10px;
+}
+
+.exercise-result-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfcfa;
+}
+
+.working-weight {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.working-weight input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+  padding: 8px 10px;
+  font-weight: 900;
+}
+
+.previous-result,
+.exercise-recommendation {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.exercise-recommendation {
+  color: #315242;
+  font-weight: 800;
+}
+
+.exercise-history {
+  padding: 8px 0 0;
+}
+
+.exercise-history summary {
+  font-size: 13px;
+}
+
+.exercise-history ul {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.exercise-history li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 8px;
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.exercise-history li strong {
+  color: var(--ink);
 }
 
 .exercise-card h3 {
@@ -1713,6 +1794,11 @@ details p {
   .exercise-card__actions {
     order: 3;
     padding: 0 14px 14px;
+  }
+
+  .working-weight {
+    grid-template-columns: 1fr;
+    gap: 5px;
   }
 
   .done-line {
