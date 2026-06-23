@@ -1,4 +1,5 @@
 import { filters, progression, safety, workouts } from "../data/workouts.js";
+import { createWorkoutCloudSync } from "./cloud-sync.js";
 
 const state = {
   activeDayId: workouts[0].id,
@@ -15,6 +16,7 @@ const notesStorageKey = `workout-notes-${currentWeek.key}`;
 const exerciseResultsStorageKey = "workout-exercise-results:v2";
 const saved = loadSaved();
 const exerciseResults = loadExerciseResults();
+let cloudSync = null;
 migrateWeeklyResults();
 const baseUrl = import.meta.env.BASE_URL;
 
@@ -33,6 +35,7 @@ const els = {
   weeklyReport: document.querySelector("#weeklyReport"),
   safetyList: document.querySelector("#safetyList"),
   progressionList: document.querySelector("#progressionList"),
+  cloudSync: document.querySelector("#cloudSync"),
 };
 
 const metricHelp = {
@@ -171,8 +174,16 @@ function loadExerciseResults() {
   };
 }
 
-function persistExerciseResults() {
+function persistExerciseResults({ sync = true, touch = true } = {}) {
+  if (touch) exerciseResults.updatedAt = new Date().toISOString();
   localStorage.setItem(exerciseResultsStorageKey, JSON.stringify(exerciseResults));
+  if (sync) {
+    cloudSync?.markLocalChange(
+      exerciseResultsStorageKey,
+      exerciseResults,
+      exerciseResults.updatedAt || new Date().toISOString(),
+    );
+  }
 }
 
 function exerciseById(exerciseId) {
@@ -239,16 +250,58 @@ function migrateWeeklyResults() {
   }
 }
 
-function persist() {
-  localStorage.setItem(progressStorageKey, JSON.stringify({
+function persist({ sync = true, touch = true } = {}) {
+  const updatedAt = touch ? new Date().toISOString() : (saved.updatedAt || new Date().toISOString());
+  saved.updatedAt = updatedAt;
+  const progressPayload = {
     days: saved.days,
     exercises: saved.exercises,
     feedback: saved.feedback || {},
     fatigue: saved.fatigue || {},
     workingWeights: saved.workingWeights || {},
-    updatedAt: new Date().toISOString(),
-  }));
-  localStorage.setItem(notesStorageKey, JSON.stringify(saved.notes || {}));
+    updatedAt,
+  };
+  const notesPayload = saved.notes || {};
+  localStorage.setItem(progressStorageKey, JSON.stringify(progressPayload));
+  localStorage.setItem(notesStorageKey, JSON.stringify(notesPayload));
+  if (sync) {
+    cloudSync?.markLocalChange(progressStorageKey, progressPayload, updatedAt);
+  }
+}
+
+function persistNotes() {
+  const notesPayload = saved.notes || {};
+  const updatedAt = new Date().toISOString();
+  localStorage.setItem(notesStorageKey, JSON.stringify(notesPayload));
+  cloudSync?.markLocalChange(notesStorageKey, notesPayload, updatedAt);
+}
+
+function replaceObject(target, source) {
+  Object.keys(target).forEach((key) => delete target[key]);
+  Object.assign(target, source);
+}
+
+function applyRemoteData(keys) {
+  const affectsCurrentProgress = keys.includes(progressStorageKey);
+  const affectsCurrentNotes = keys.includes(notesStorageKey);
+  const affectsResults = keys.includes(exerciseResultsStorageKey);
+  if (!affectsCurrentProgress && !affectsCurrentNotes && !affectsResults) {
+    renderHistory();
+    renderWeeklyReport();
+    return;
+  }
+
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  const focusedElement = document.activeElement;
+  if (affectsCurrentProgress || affectsCurrentNotes) replaceObject(saved, loadSaved());
+  if (affectsResults) replaceObject(exerciseResults, loadExerciseResults());
+  syncAllDayCompletion();
+  render();
+  requestAnimationFrame(() => {
+    window.scrollTo({ top: scrollY, left: scrollX, behavior: "auto" });
+    focusedElement?.focus?.({ preventScroll: true });
+  });
 }
 
 function todayWorkoutId() {
@@ -1243,7 +1296,7 @@ function renderDayDetails() {
 
   els.dayDetails.querySelector("#dayNotes").addEventListener("input", (event) => {
     saved.notes[day.id] = event.target.value;
-    persist();
+    persistNotes();
   });
   els.dayDetails.querySelector("#dayNotes").addEventListener("click", (event) => event.stopPropagation());
 
@@ -1558,6 +1611,75 @@ function renderLists() {
   els.progressionList.innerHTML = progression.map((item) => `<li>${item}</li>`).join("");
 }
 
+function renderCloudSyncStatus({ configured, status, message, user, online }) {
+  if (!els.cloudSync) return;
+  const signedIn = Boolean(user);
+  const statusText = message || {
+    unconfigured: "Нужно добавить настройки Supabase",
+    "signed-out": "Войдите, чтобы синхронизировать устройства",
+    ready: "Готово к синхронизации",
+    syncing: "Синхронизация...",
+    synced: "Данные синхронизированы",
+    offline: "Офлайн: изменения сохраняются на устройстве",
+    error: "Ошибка синхронизации",
+    "email-sent": "Ссылка для входа отправлена",
+  }[status] || "";
+
+  els.cloudSync.dataset.status = status;
+  els.cloudSync.querySelector(".cloud-sync__status").textContent = statusText;
+  els.cloudSync.querySelector(".cloud-sync__account").textContent = signedIn ? user.email : "";
+  els.cloudSync.querySelector(".cloud-sync__login").hidden = signedIn || !configured;
+  els.cloudSync.querySelector(".cloud-sync__session").hidden = !signedIn;
+  els.cloudSync.querySelector(".cloud-sync__setup").hidden = configured;
+  els.cloudSync.querySelector("[data-sync-now]").disabled = !online || status === "syncing";
+}
+
+function initCloudSync() {
+  if (!els.cloudSync) return;
+  cloudSync = createWorkoutCloudSync({
+    onStatus: renderCloudSyncStatus,
+    onRemoteApplied: applyRemoteData,
+  });
+
+  els.cloudSync.querySelector(".cloud-sync__login").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const email = form.elements.email.value.trim();
+    if (!email) return;
+    const button = form.querySelector("button");
+    button.disabled = true;
+    try {
+      await cloudSync.signIn(email);
+    } catch (error) {
+      renderCloudSyncStatus({
+        configured: cloudSync.configured,
+        status: "error",
+        message: error.message,
+        user: null,
+        online: navigator.onLine,
+      });
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  els.cloudSync.querySelector("[data-sync-now]").addEventListener("click", () => cloudSync.syncNow());
+  els.cloudSync.querySelector("[data-sign-out]").addEventListener("click", async () => {
+    try {
+      await cloudSync.signOut();
+    } catch (error) {
+      renderCloudSyncStatus({
+        configured: cloudSync.configured,
+        status: "error",
+        message: error.message,
+        user: null,
+        online: navigator.onLine,
+      });
+    }
+  });
+  cloudSync.init();
+}
+
 function selectDay(dayId) {
   state.activeDayId = dayId;
   render();
@@ -1596,5 +1718,6 @@ els.todayButton.addEventListener("click", () => selectDay(todayWorkoutId()));
 
 renderLists();
 syncAllDayCompletion();
-persist();
+persist({ sync: false, touch: false });
 render();
+initCloudSync();

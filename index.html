@@ -40,6 +40,28 @@
         <button class="today-button" id="todayButton" type="button">Сегодня</button>
       </section>
 
+      <section class="cloud-sync-card" id="cloudSync" aria-label="Синхронизация данных">
+        <div class="cloud-sync__copy">
+          <strong>Синхронизация</strong>
+          <span class="cloud-sync__status" aria-live="polite">Проверяем подключение...</span>
+          <small class="cloud-sync__account"></small>
+        </div>
+        <form class="cloud-sync__login">
+          <label>
+            <span class="sr-only">Электронная почта</span>
+            <input name="email" type="email" autocomplete="email" placeholder="Электронная почта" required />
+          </label>
+          <button type="submit">Получить ссылку</button>
+        </form>
+        <div class="cloud-sync__session" hidden>
+          <button type="button" data-sync-now>Синхронизировать</button>
+          <button type="button" class="is-secondary" data-sign-out>Выйти</button>
+        </div>
+        <p class="cloud-sync__setup" hidden>
+          Добавьте <code>VITE_SUPABASE_URL</code> и <code>VITE_SUPABASE_ANON_KEY</code>, чтобы включить облако.
+        </p>
+      </section>
+
       <section class="panel" id="search">
         <div class="section-title">
           <div>

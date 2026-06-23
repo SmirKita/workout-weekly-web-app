@@ -3,4 +3,7 @@ node_modules/
 dist/
 .vite/
 npm-debug.log*
+.env
+.env.local
+.env.*.local
 source/Методичка_*понятными*.pdf

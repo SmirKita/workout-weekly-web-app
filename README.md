@@ -1,6 +1,6 @@
 # Workout Weekly Web App
 
-Интерактивная веб-версия PDF-методички с недельным планом тренировок: быстрый выбор дня, поиск, фильтры, карточки упражнений, подробная техника, режим «Быстро в зале», заметки и отметки выполнения.
+Интерактивная веб-версия PDF-методички с недельным планом тренировок: быстрый выбор дня, поиск, фильтры, карточки упражнений, подробная техника, режим «Быстро в зале», заметки, отметки выполнения и необязательная синхронизация через Supabase.
 
 Публичный адрес после публикации:
 
@@ -205,6 +205,89 @@ Settings -> Pages -> Source -> GitHub Actions
 ```
 
 Не используйте папку `docs`, если деплой идёт через GitHub Actions.
+
+## Синхронизация через Supabase
+
+Без настройки Supabase приложение продолжает полноценно работать через `localStorage`.
+После настройки пользователь входит по magic link из электронной почты, а данные синхронизируются между устройствами.
+
+Облачные записи повторяют текущую локальную структуру:
+
+- `workout-progress-YYYY-WW` — выполнение, недельный прогресс, усталость и оценки недели;
+- `workout-notes-YYYY-WW` — заметки недели;
+- `workout-exercise-results:v2` — рабочие веса и история упражнений.
+
+Конфликты разрешаются по `client_updated_at`: сохраняется запись с более поздним временем изменения.
+Неотправленные изменения находятся в локальном outbox и автоматически отправляются после восстановления соединения.
+Старые локальные данные при первом входе добавляются в облако и не удаляются.
+
+### 1. Создать проект
+
+1. Откройте [Supabase Dashboard](https://supabase.com/dashboard).
+2. Создайте проект на бесплатном тарифе.
+3. Дождитесь завершения настройки базы.
+
+### 2. Создать таблицу и RLS
+
+1. Откройте `SQL Editor` в проекте Supabase.
+2. Скопируйте весь файл `supabase/schema.sql`.
+3. Выполните SQL.
+
+Скрипт создаёт таблицу `workout_sync_records`, включает Row Level Security и политики,
+по которым авторизованный пользователь видит и изменяет только строки со своим `user_id`.
+
+### 3. Настроить адреса Auth
+
+Откройте `Authentication -> URL Configuration` и укажите:
+
+```text
+Site URL:
+https://smirkita.github.io/workout-weekly-web-app/
+
+Redirect URLs:
+https://smirkita.github.io/workout-weekly-web-app/
+http://localhost:5173/workout-weekly-web-app/
+http://localhost:4173/workout-weekly-web-app/
+```
+
+В `Authentication -> Providers -> Email` оставьте Email provider включённым.
+Стандартный шаблон с `ConfirmationURL` отправляет magic link.
+
+### 4. Получить URL и anon key
+
+Откройте `Project Settings -> API` и скопируйте:
+
+- `Project URL`;
+- публичный `anon` / `publishable` key.
+
+Никогда не добавляйте `service_role` key в приложение или GitHub.
+
+Для локальной разработки создайте `.env.local` по примеру `.env.example`:
+
+```text
+VITE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+VITE_SUPABASE_ANON_KEY=YOUR_PUBLIC_ANON_KEY
+```
+
+### 5. Добавить переменные в GitHub
+
+В репозитории откройте:
+
+```text
+Settings -> Secrets and variables -> Actions -> New repository secret
+```
+
+Добавьте два секрета:
+
+```text
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
+```
+
+Workflow передаёт их только в Vite-сборку. Публичный anon key попадёт в клиентский JavaScript,
+что является штатным режимом Supabase; доступ к данным ограничивает RLS.
+
+После добавления секретов сделайте новый push в `main` или запустите workflow вручную.
 
 ## Как обновить сайт после правок
 
