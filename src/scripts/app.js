@@ -20,6 +20,7 @@ const saved = loadSaved();
 const exerciseResults = loadExerciseResults();
 let cloudSync = null;
 let authLinkSubmitting = false;
+let authOtpSubmitting = false;
 let authLinkCooldownTimer = null;
 let lastCloudSyncPayload = null;
 migrateWeeklyResults();
@@ -1629,12 +1630,13 @@ function renderCloudSyncStatus({ configured, status, message, user, online, diag
     synced: "Данные синхронизированы",
     offline: "Офлайн: изменения сохраняются на устройстве",
     error: "Ошибка синхронизации",
-    "email-sent": "Ссылка для входа отправлена",
-    "email-sending": "Отправляем ссылку...",
+    "email-sent": "Код отправлен на почту",
+    "email-sending": "Отправляем код...",
+    "otp-verifying": "Проверяем код...",
   }[status] || "";
   const authStatusText = authLinkSubmitting
-    ? "Отправляем ссылку..."
-    : `Ссылка отправлена. Проверьте почту. Повторно можно запросить через ${cooldownSeconds} сек.`;
+    ? "Отправляем код..."
+    : `Код отправлен. Проверьте почту. Повторно можно запросить через ${cooldownSeconds} сек.`;
 
   els.cloudSync.dataset.status = status;
   els.cloudSync.querySelector(".cloud-sync__status").textContent =
@@ -1644,11 +1646,16 @@ function renderCloudSyncStatus({ configured, status, message, user, online, diag
   els.cloudSync.querySelector(".cloud-sync__session").hidden = !signedIn;
   els.cloudSync.querySelector(".cloud-sync__setup").hidden = configured;
   els.cloudSync.querySelector("[data-sync-now]").disabled = !online || status === "syncing";
-  const loginButton = els.cloudSync.querySelector(".cloud-sync__login button");
+  const loginButton = els.cloudSync.querySelector("[data-send-otp]");
+  const verifyButton = els.cloudSync.querySelector("[data-verify-otp]");
   if (loginButton) {
     const disabled = authLinkSubmitting || cooldownSeconds > 0 || !online;
     loginButton.disabled = disabled;
-    loginButton.textContent = cooldownSeconds > 0 ? `Повтор через ${cooldownSeconds} сек` : "Получить ссылку";
+    loginButton.textContent = cooldownSeconds > 0 ? `Повтор через ${cooldownSeconds} сек` : "Получить код";
+  }
+  if (verifyButton) {
+    verifyButton.disabled = authOtpSubmitting || !online;
+    verifyButton.textContent = authOtpSubmitting ? "Проверяем..." : "Войти по коду";
   }
   const diagnosticsNode = els.cloudSync.querySelector(".cloud-sync__diagnostics");
   const showDiagnostics = Boolean(diagnostics?.requestUrl || diagnostics?.response);
@@ -1687,12 +1694,18 @@ function scheduleAuthLinkCooldownRender() {
 function cloudAuthErrorMessage(error) {
   const responseCode = error?.code || error?.error_code || error?.diagnostics?.code || "";
   if (responseCode === "over_email_send_rate_limit") {
-    return "Слишком много запросов письма. Подождите 10–20 минут и попробуйте снова.";
+    return "Слишком много запросов. Подождите 10–20 минут и попробуйте снова.";
   }
   if (responseCode === "email_address_invalid") {
     return "Проверьте адрес почты и попробуйте ещё раз.";
   }
-  return "Не удалось отправить ссылку. Попробуйте позже.";
+  if (responseCode === "otp_expired" || responseCode === "otp_disabled") {
+    return "Код устарел или недействителен. Запросите новый код и попробуйте снова.";
+  }
+  if (["bad_code_verifier", "validation_failed", "invalid_grant"].includes(responseCode)) {
+    return "Проверьте код из письма и попробуйте ещё раз.";
+  }
+  return "Не удалось выполнить вход. Попробуйте позже.";
 }
 
 function initCloudSync() {
@@ -1708,7 +1721,6 @@ function initCloudSync() {
     const email = form.elements.email.value.trim();
     if (!email || authLinkSubmitting || authLinkCooldownSeconds() > 0) return;
     authLinkSubmitting = true;
-    startAuthLinkCooldown();
     renderCloudSyncStatus({
       configured: cloudSync.configured,
       status: "email-sending",
@@ -1717,7 +1729,11 @@ function initCloudSync() {
     });
     try {
       await cloudSync.signIn(email);
+      startAuthLinkCooldown();
     } catch (error) {
+      if ((error?.code || error?.diagnostics?.code) === "over_email_send_rate_limit") {
+        startAuthLinkCooldown();
+      }
       renderCloudSyncStatus({
         configured: cloudSync.configured,
         status: "error",
@@ -1728,6 +1744,36 @@ function initCloudSync() {
       });
     } finally {
       authLinkSubmitting = false;
+      if (lastCloudSyncPayload) renderCloudSyncStatus(lastCloudSyncPayload);
+    }
+  });
+
+  els.cloudSync.querySelector("[data-verify-otp]").addEventListener("click", async (event) => {
+    event.preventDefault();
+    const form = els.cloudSync.querySelector(".cloud-sync__login");
+    const email = form.elements.email.value.trim();
+    const token = form.elements.otp.value.trim().replace(/\s+/g, "");
+    if (!email || !token || authOtpSubmitting) return;
+    authOtpSubmitting = true;
+    renderCloudSyncStatus({
+      configured: cloudSync.configured,
+      status: "otp-verifying",
+      user: null,
+      online: navigator.onLine,
+    });
+    try {
+      await cloudSync.verifyOtp(email, token);
+    } catch (error) {
+      renderCloudSyncStatus({
+        configured: cloudSync.configured,
+        status: "error",
+        message: cloudAuthErrorMessage(error),
+        user: null,
+        online: navigator.onLine,
+        diagnostics: error.diagnostics,
+      });
+    } finally {
+      authOtpSubmitting = false;
       if (lastCloudSyncPayload) renderCloudSyncStatus(lastCloudSyncPayload);
     }
   });

@@ -192,6 +192,8 @@ main {
 .cloud-sync__session {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 8px;
 }
@@ -1828,6 +1830,10 @@ details p {
   .cloud-sync__login {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .cloud-sync__login label {
+    min-width: 0;
   }
 
   .cloud-sync__login input {

@@ -290,7 +290,24 @@ export function createWorkoutCloudSync({ onStatus, onRemoteApplied } = {}) {
       error.diagnostics = lastRequest;
       throw error;
     }
-    report("email-sent", "Ссылка для входа отправлена на почту");
+    report("email-sent", "Код отправлен на почту");
+  }
+
+  async function verifyOtp(email, token) {
+    if (!configured) throw new Error("Supabase ещё не настроен");
+    const { data, error } = await client.auth.verifyOtp({
+      email,
+      token,
+      type: "email",
+    });
+    if (error) {
+      error.diagnostics = lastRequest;
+      throw error;
+    }
+    user = data.session?.user || data.user || user;
+    report(user ? "ready" : "signed-out");
+    if (user) await syncNow();
+    return data;
   }
 
   async function signOut() {
@@ -334,6 +351,7 @@ export function createWorkoutCloudSync({ onStatus, onRemoteApplied } = {}) {
     init,
     markLocalChange,
     signIn,
+    verifyOtp,
     signOut,
     syncNow,
     destroy() {
