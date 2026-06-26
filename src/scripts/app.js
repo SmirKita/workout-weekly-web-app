@@ -15,6 +15,8 @@ const progressStorageKey = `workout-progress-${currentWeek.key}`;
 const notesStorageKey = `workout-notes-${currentWeek.key}`;
 const exerciseResultsStorageKey = "workout-exercise-results:v2";
 const authLinkCooldownStorageKey = "workout-sync-auth-link-cooldown-until:v1";
+const syncMetaStorageKey = "workout-sync-meta:v1";
+const backupFileName = "backup-workout-weekly.json";
 const authLinkCooldownMs = 60 * 1000;
 const saved = loadSaved();
 const exerciseResults = loadExerciseResults();
@@ -280,6 +282,113 @@ function persistNotes() {
   const updatedAt = new Date().toISOString();
   localStorage.setItem(notesStorageKey, JSON.stringify(notesPayload));
   cloudSync?.markLocalChange(notesStorageKey, notesPayload, updatedAt);
+}
+
+function dateMs(value) {
+  const time = new Date(value || 0).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function isWorkoutDataKey(key) {
+  return key.startsWith("workout-") && !key.startsWith("workout-sync-");
+}
+
+function storagePayload(key) {
+  const raw = localStorage.getItem(key);
+  if (raw === null) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function latestExerciseHistoryDate(payload) {
+  if (!payload || typeof payload !== "object") return "";
+  return Object.values(payload.exercises || {})
+    .flatMap((exercise) => exercise.history || [])
+    .map((entry) => entry.date)
+    .filter(Boolean)
+    .sort()
+    .at(-1) || "";
+}
+
+function inferredStorageUpdatedAt(key, payload) {
+  const syncMeta = loadJson(syncMetaStorageKey, {});
+  if (syncMeta[key]) return syncMeta[key];
+  if (payload && typeof payload === "object" && payload.updatedAt) return payload.updatedAt;
+  if (key === exerciseResultsStorageKey) return latestExerciseHistoryDate(payload);
+  if (key.startsWith("workout-notes-")) {
+    const pairedProgress = storagePayload(key.replace("workout-notes-", "workout-progress-"));
+    if (pairedProgress?.updatedAt) return pairedProgress.updatedAt;
+  }
+  return "";
+}
+
+function workoutBackupRecords() {
+  const records = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (!key || !isWorkoutDataKey(key)) continue;
+    const payload = storagePayload(key);
+    records.push({
+      key,
+      payload,
+      updatedAt: inferredStorageUpdatedAt(key, payload) || new Date().toISOString(),
+    });
+  }
+  return records.sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function createWorkoutBackup() {
+  return {
+    app: "workout-weekly-web-app",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    records: workoutBackupRecords(),
+  };
+}
+
+function normalizeBackupRecords(value) {
+  const parsed = typeof value === "string" ? JSON.parse(value) : value;
+  const records = Array.isArray(parsed?.records)
+    ? parsed.records
+    : Object.entries(parsed?.data || parsed || {}).map(([key, payload]) => ({ key, payload }));
+  const normalized = records
+    .filter((record) => record && typeof record.key === "string" && isWorkoutDataKey(record.key))
+    .map((record) => ({
+      key: record.key,
+      payload: record.payload,
+      updatedAt: record.updatedAt || record.client_updated_at || inferredStorageUpdatedAt(record.key, record.payload) || new Date().toISOString(),
+    }))
+    .filter((record) => record.payload !== undefined);
+  if (!normalized.length) {
+    throw new Error("В JSON не найдены данные методички для импорта.");
+  }
+  return normalized;
+}
+
+function importWorkoutBackup(records) {
+  const syncMeta = loadJson(syncMetaStorageKey, {});
+  const updatedKeys = [];
+  let skipped = 0;
+
+  records.forEach((record) => {
+    const currentPayload = storagePayload(record.key);
+    const currentUpdatedAt = inferredStorageUpdatedAt(record.key, currentPayload);
+    if (currentPayload !== null && dateMs(currentUpdatedAt) > dateMs(record.updatedAt)) {
+      skipped += 1;
+      return;
+    }
+    localStorage.setItem(record.key, JSON.stringify(record.payload));
+    syncMeta[record.key] = record.updatedAt;
+    updatedKeys.push(record.key);
+    cloudSync?.markLocalChange(record.key, record.payload, record.updatedAt);
+  });
+
+  localStorage.setItem(syncMetaStorageKey, JSON.stringify(syncMeta));
+  if (updatedKeys.length) applyRemoteData(updatedKeys);
+  return { updated: updatedKeys.length, skipped };
 }
 
 function replaceObject(target, source) {
@@ -1708,12 +1817,109 @@ function cloudAuthErrorMessage(error) {
   return "Не удалось выполнить вход. Попробуйте позже.";
 }
 
+function transferStatus(message, isError = false) {
+  const node = els.cloudSync?.querySelector(".cloud-sync__transfer-status");
+  if (!node) return;
+  node.textContent = message;
+  node.classList.toggle("is-error", isError);
+}
+
+function backupTextarea() {
+  return els.cloudSync?.querySelector("[data-backup-json]");
+}
+
+function exportBackupText() {
+  const backup = createWorkoutBackup();
+  const text = JSON.stringify(backup, null, 2);
+  backupTextarea().value = text;
+  transferStatus(`Экспорт готов: ${backup.records.length} записей. Скачайте файл или скопируйте JSON.`);
+  return text;
+}
+
+function downloadBackup() {
+  const text = exportBackupText();
+  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = backupFileName;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function copyBackup() {
+  const text = exportBackupText();
+  try {
+    await navigator.clipboard.writeText(text);
+    transferStatus("JSON скопирован в буфер обмена.");
+  } catch {
+    transferStatus("JSON показан в поле. Если копирование не сработало, выделите и скопируйте его вручную.");
+    backupTextarea().focus({ preventScroll: true });
+    backupTextarea().select();
+  }
+}
+
+async function readImportFile(file) {
+  if (!file) return;
+  const text = await file.text();
+  backupTextarea().value = text;
+  transferStatus("Файл загружен в поле импорта. Проверьте и нажмите «Импорт данных».");
+}
+
+function importBackupFromTextarea() {
+  const text = backupTextarea().value.trim();
+  if (!text) {
+    transferStatus("Вставьте JSON или выберите файл импорта.", true);
+    return;
+  }
+  let records;
+  try {
+    records = normalizeBackupRecords(text);
+  } catch (error) {
+    transferStatus(error.message || "Не удалось прочитать JSON импорта.", true);
+    return;
+  }
+
+  const approved = window.confirm(
+    "Будут добавлены или обновлены данные методички. Существующие более новые записи сохранятся.",
+  );
+  if (!approved) {
+    transferStatus("Импорт отменён.");
+    return;
+  }
+
+  try {
+    const result = importWorkoutBackup(records);
+    transferStatus(`Импорт завершён: обновлено ${result.updated}, сохранено более новых ${result.skipped}.`);
+    if (result.updated) cloudSync?.syncNow();
+  } catch (error) {
+    transferStatus(error.message || "Не удалось импортировать данные.", true);
+  }
+}
+
+function initBackupTransfer() {
+  const root = els.cloudSync;
+  if (!root) return;
+  root.querySelector("[data-export-backup]").addEventListener("click", downloadBackup);
+  root.querySelector("[data-copy-backup]").addEventListener("click", copyBackup);
+  root.querySelector("[data-import-file]").addEventListener("change", (event) => {
+    readImportFile(event.target.files?.[0]).catch((error) => {
+      transferStatus(error.message || "Не удалось прочитать файл.", true);
+    });
+  });
+  root.querySelector("[data-import-backup]").addEventListener("click", importBackupFromTextarea);
+  backupTextarea().addEventListener("click", (event) => event.stopPropagation());
+  backupTextarea().addEventListener("keydown", (event) => event.stopPropagation());
+}
+
 function initCloudSync() {
   if (!els.cloudSync) return;
   cloudSync = createWorkoutCloudSync({
     onStatus: renderCloudSyncStatus,
     onRemoteApplied: applyRemoteData,
   });
+  initBackupTransfer();
 
   els.cloudSync.querySelector(".cloud-sync__login").addEventListener("submit", async (event) => {
     event.preventDefault();

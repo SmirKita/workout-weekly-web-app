@@ -4,7 +4,10 @@ const META_KEY = "workout-sync-meta:v1";
 const OUTBOX_KEY = "workout-sync-outbox:v1";
 const IMPORTED_USERS_KEY = "workout-sync-imported-users:v1";
 const UPSERT_RPC_NAME = "upsert_workout_sync_record";
-const SYNCABLE_KEY = /^(workout-progress-\d{4}-W\d{2}|workout-notes-\d{4}-W\d{2}|workout-exercise-results:v2)$/;
+
+function isSyncableKey(key) {
+  return key.startsWith("workout-") && !key.startsWith("workout-sync-");
+}
 
 function loadJson(key, fallback) {
   try {
@@ -58,7 +61,7 @@ function localRecords() {
   const records = new Map();
   for (let index = 0; index < localStorage.length; index += 1) {
     const key = localStorage.key(index);
-    if (!key || !SYNCABLE_KEY.test(key)) continue;
+    if (!key || !isSyncableKey(key)) continue;
     const payload = loadJson(key, null);
     if (!hasMeaningfulData(key, payload)) continue;
     const updatedAt = meta[key] || inferredUpdatedAt(key, payload) || new Date().toISOString();
@@ -166,7 +169,7 @@ export function createWorkoutCloudSync({ onStatus, onRemoteApplied } = {}) {
   });
 
   function markLocalChange(recordKey, payload, updatedAt = new Date().toISOString()) {
-    if (!SYNCABLE_KEY.test(recordKey)) return;
+    if (!isSyncableKey(recordKey)) return;
     const meta = loadJson(META_KEY, {});
     const outbox = loadJson(OUTBOX_KEY, {});
     meta[recordKey] = updatedAt;

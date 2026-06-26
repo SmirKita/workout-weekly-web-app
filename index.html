@@ -65,6 +65,24 @@
         <p class="cloud-sync__setup" hidden>
           Добавьте <code>VITE_SUPABASE_URL</code> и <code>VITE_SUPABASE_ANON_KEY</code>, чтобы включить облако.
         </p>
+        <details class="cloud-sync__transfer">
+          <summary>Перенос данных</summary>
+          <p>
+            Если на iPhone прогресс остался в старом ярлыке, откройте старый ярлык,
+            нажмите «Экспорт данных», затем откройте сайт в Safari после входа и импортируйте данные.
+          </p>
+          <div class="cloud-sync__transfer-actions">
+            <button type="button" class="is-secondary" data-export-backup>Экспорт данных</button>
+            <button type="button" class="is-secondary" data-copy-backup>Скопировать JSON</button>
+            <label class="cloud-sync__file">
+              <span>Файл импорта</span>
+              <input type="file" accept="application/json,.json" data-import-file />
+            </label>
+          </div>
+          <textarea data-backup-json placeholder="Здесь появится JSON экспорта или вставьте JSON для импорта"></textarea>
+          <button type="button" data-import-backup>Импорт данных</button>
+          <small class="cloud-sync__transfer-status" aria-live="polite"></small>
+        </details>
         <details class="cloud-sync__diagnostics" hidden>
           <summary>Диагностика синхронизации</summary>
           <dl>

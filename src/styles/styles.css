@@ -232,6 +232,72 @@ main {
   color: var(--muted);
 }
 
+.cloud-sync__transfer {
+  width: 100%;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.cloud-sync__transfer summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.cloud-sync__transfer p {
+  max-width: 760px;
+  margin: 8px 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.cloud-sync__transfer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.cloud-sync__file {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.cloud-sync__file input {
+  max-width: 170px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.cloud-sync__transfer textarea {
+  width: 100%;
+  min-height: 120px;
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px 12px;
+  resize: vertical;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.cloud-sync__transfer-status {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.cloud-sync__transfer-status.is-error {
+  color: #b04b38;
+}
+
 .cloud-sync__diagnostics {
   width: 100%;
   border-top: 1px solid var(--line);
@@ -1817,6 +1883,7 @@ details p {
   .cloud-sync__login,
   .cloud-sync__session,
   .cloud-sync__setup,
+  .cloud-sync__transfer,
   .cloud-sync__diagnostics {
     width: 100%;
     margin-left: 0;
@@ -1842,6 +1909,23 @@ details p {
 
   .cloud-sync__session button {
     flex: 1;
+  }
+
+  .cloud-sync__transfer-actions,
+  .cloud-sync__transfer > button {
+    width: 100%;
+  }
+
+  .cloud-sync__transfer-actions button,
+  .cloud-sync__transfer > button,
+  .cloud-sync__file {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .cloud-sync__file {
+    border-radius: 18px;
+    flex-wrap: wrap;
   }
 
   .day-pills {
