@@ -1302,6 +1302,58 @@ function cardioFieldsFor(key) {
   return saved.cardio?.[key] || {};
 }
 
+function cardioDefaultMinutes(amount) {
+  const text = String(amount || "");
+  const range = /(\d+)\s*[-–]\s*(\d+)\s*мин/i.exec(text);
+  if (range) return String(Math.round((Number(range[1]) + Number(range[2])) / 2));
+  const exact = /(\d+)\s*мин/i.exec(text);
+  return exact ? exact[1] : "";
+}
+
+function cardioDistanceFor(minutes) {
+  return {
+    10: "0.8 км",
+    15: "1.2 км",
+    20: "1.6 км",
+    30: "2.4 км",
+  }[String(minutes)] || "";
+}
+
+function cardioCaloriesFor(minutes) {
+  return {
+    10: "60",
+    15: "90",
+    20: "120",
+    30: "180",
+  }[String(minutes)] || "";
+}
+
+function cardioDefaultLevel(key, item) {
+  const title = normalize(item.title);
+  if (key.startsWith("mon-entry")) return "8";
+  if (key.startsWith("thu-entry")) return "7";
+  if (title.includes("эллипс")) return "7";
+  if (title.includes("греб")) return "10";
+  if (title.includes("велотренаж")) return "8";
+  return "";
+}
+
+function cardioDefaultsFor(key, item) {
+  const minutes = cardioDefaultMinutes(item.amount);
+  return {
+    level: cardioDefaultLevel(key, item),
+    minutes,
+    distance: cardioDistanceFor(minutes),
+    calories: cardioCaloriesFor(minutes),
+  };
+}
+
+function cardioFieldValue(stored, defaults, field) {
+  const value = stored?.[field];
+  if (field === "calories" && value !== undefined && value !== "" && Number(value) <= 1) return defaults[field] || "";
+  return value !== undefined && value !== "" ? value : defaults[field] || "";
+}
+
 function setRoutineCardioField(key, field, value) {
   saved.cardio[key] = {
     ...cardioFieldsFor(key),
@@ -1700,6 +1752,7 @@ function renderRoutineSection(section) {
     const isDone = Boolean(saved.exercises[key]);
     const cardioFields = cardioFieldsFor(key);
     const showCardioFields = isCardioRoutine(section, item);
+    const cardioDefaults = showCardioFields ? cardioDefaultsFor(key, item) : {};
     const row = document.createElement("article");
     row.className = `routine-item ${isDone ? "is-done" : ""}`;
     row.role = "button";
@@ -1719,10 +1772,10 @@ function renderRoutineSection(section) {
         }
         ${showCardioFields ? `
           <div class="routine-cardio-fields" aria-label="Результат кардио">
-            <label><span>Уровень / мощность</span><input type="text" value="${escapeHtml(cardioFields.level || "")}" data-cardio-field="level" /></label>
-            <label><span>Минуты</span><input type="number" inputmode="decimal" step="0.1" value="${escapeHtml(cardioFields.minutes || "")}" data-cardio-field="minutes" /></label>
-            <label><span>Дистанция</span><input type="text" placeholder="км или м" value="${escapeHtml(cardioFields.distance || "")}" data-cardio-field="distance" /></label>
-            <label><span>Калории</span><input type="number" inputmode="decimal" value="${escapeHtml(cardioFields.calories || "")}" data-cardio-field="calories" /></label>
+            <label><span>Уровень / мощность</span><input type="text" value="${escapeHtml(cardioFieldValue(cardioFields, cardioDefaults, "level"))}" data-cardio-field="level" /></label>
+            <label><span>Минуты</span><input type="number" inputmode="decimal" step="0.1" value="${escapeHtml(cardioFieldValue(cardioFields, cardioDefaults, "minutes"))}" data-cardio-field="minutes" /></label>
+            <label><span>Дистанция</span><input type="text" placeholder="км или м" value="${escapeHtml(cardioFieldValue(cardioFields, cardioDefaults, "distance"))}" data-cardio-field="distance" /></label>
+            <label><span>Калории</span><input type="number" inputmode="decimal" value="${escapeHtml(cardioFieldValue(cardioFields, cardioDefaults, "calories"))}" data-cardio-field="calories" /></label>
           </div>
         ` : ""}
       </div>
