@@ -45,7 +45,6 @@ const els = {
   historyList: document.querySelector("#historyList"),
   loadSummary: document.querySelector("#loadSummary"),
   weeklyReport: document.querySelector("#weeklyReport"),
-  cardioTracker: document.querySelector("#cardioTracker"),
   bodyTracker: document.querySelector("#bodyTracker"),
   safetyList: document.querySelector("#safetyList"),
   progressionList: document.querySelector("#progressionList"),
@@ -89,41 +88,6 @@ const fatigueReportLabels = {
   strong: "сильная",
 };
 
-const cardioMachines = {
-  treadmill: {
-    machineType: "treadmill",
-    machineName: "Беговая дорожка Technogym Excite Live Run 7000",
-    programs: ["Выносливость", "Кардио"],
-    programName: "Выносливость",
-    level: "",
-    durationMinutes: 20,
-  },
-  bike: {
-    machineType: "bike",
-    machineName: "Горизонтальный велотренажер Technogym Excite Recline Live 500",
-    programs: ["Укрепление ног"],
-    programName: "Укрепление ног",
-    level: "8",
-    durationMinutes: 20,
-  },
-  elliptical: {
-    machineType: "elliptical",
-    machineName: "Эллиптический тренажер Artis Synchro Live",
-    programs: ["Ручной режим"],
-    programName: "Ручной режим",
-    level: "7",
-    durationMinutes: 20,
-  },
-  rower: {
-    machineType: "rower",
-    machineName: "Гребной тренажер Technogym Skillrow",
-    programs: ["Мощность / сопротивление"],
-    programName: "Мощность / сопротивление",
-    level: "10",
-    durationMinutes: 10,
-  },
-};
-
 const bodyMetricDefaults = {
   weightKg: 75.5,
   targetWeightKg: 79.9,
@@ -143,7 +107,6 @@ const bodyMetricDefaults = {
 
 const bodyMetricFields = [
   ["weightKg", "Вес", "кг"],
-  ["targetWeightKg", "Цель веса", "кг"],
   ["bodyFatPercent", "Жир", "%"],
   ["waterPercent", "Вода", "%"],
   ["visceralFat", "Висцеральный жир", ""],
@@ -212,6 +175,7 @@ function emptyProgress() {
     fatigue: {},
     workingWeights: {},
     strength: {},
+    cardio: {},
   };
 }
 
@@ -261,6 +225,7 @@ function loadExerciseResults() {
 }
 
 function loadCardioResults() {
+  // Kept only for backward compatibility with earlier exports/sync records.
   return loadJson(cardioResultsStorageKey, null) || {
     version: 1,
     sessions: [],
@@ -381,6 +346,7 @@ function persist({ sync = true, touch = true } = {}) {
     fatigue: saved.fatigue || {},
     workingWeights: saved.workingWeights || {},
     strength: saved.strength || {},
+    cardio: saved.cardio || {},
     updatedAt,
   };
   const notesPayload = saved.notes || {};
@@ -706,8 +672,8 @@ function strengthForExercise(exercise) {
 
 function performanceText(entry) {
   if (!entry) return "";
-  const sets = entry.actualSets || entry.targetSets || "";
-  const reps = entry.actualReps || entry.targetReps || "";
+  const sets = entry.actualSets || "";
+  const reps = entry.actualReps || "";
   return sets && reps ? `${sets} x ${reps}` : "";
 }
 
@@ -831,7 +797,8 @@ function hasStoredProgress(source) {
       Object.values(source.feedback || {}).some(Boolean) ||
       Object.values(source.fatigue || {}).some(Boolean) ||
       Object.values(source.workingWeights || {}).some(Boolean) ||
-      Object.values(source.strength || {}).some(Boolean),
+      Object.values(source.strength || {}).some(Boolean) ||
+      Object.values(source.cardio || {}).some((entry) => Object.values(entry || {}).some(Boolean)),
   );
 }
 
@@ -1313,8 +1280,6 @@ function setExerciseStrengthField(exerciseId, field, value) {
   if (!exercise) return;
   const current = strengthForExercise(exercise);
   saved.strength[exerciseId] = {
-    targetSets: current.targetSets,
-    targetReps: current.targetReps,
     actualSets: current.actualSets,
     actualReps: current.actualReps,
     [field]: String(value).trim(),
@@ -1325,6 +1290,23 @@ function setExerciseStrengthField(exerciseId, field, value) {
     currentEntry.date = new Date().toISOString();
     persistExerciseResults();
   }
+  persist();
+}
+
+function isCardioRoutine(section, item) {
+  const text = normalize(`${section.kind} ${section.title} ${item.title} ${item.amount} ${item.technique}`);
+  return section.kind === "entry" || section.kind === "interval" || /кардио|эллипс|гребл|велотренаж|дорожк|велосипед/.test(text);
+}
+
+function cardioFieldsFor(key) {
+  return saved.cardio?.[key] || {};
+}
+
+function setRoutineCardioField(key, field, value) {
+  saved.cardio[key] = {
+    ...cardioFieldsFor(key),
+    [field]: String(value).trim(),
+  };
   persist();
 }
 
@@ -1716,6 +1698,8 @@ function renderRoutineSection(section) {
   section.items.forEach((item, index) => {
     const key = `${section.id}:${index}`;
     const isDone = Boolean(saved.exercises[key]);
+    const cardioFields = cardioFieldsFor(key);
+    const showCardioFields = isCardioRoutine(section, item);
     const row = document.createElement("article");
     row.className = `routine-item ${isDone ? "is-done" : ""}`;
     row.role = "button";
@@ -1733,6 +1717,14 @@ function renderRoutineSection(section) {
             ? ""
             : `<p><strong>Как:</strong> ${item.technique}</p><p><strong>Зачем:</strong> ${item.goal}</p>`
         }
+        ${showCardioFields ? `
+          <div class="routine-cardio-fields" aria-label="Результат кардио">
+            <label><span>Уровень / мощность</span><input type="text" value="${escapeHtml(cardioFields.level || "")}" data-cardio-field="level" /></label>
+            <label><span>Минуты</span><input type="number" inputmode="decimal" step="0.1" value="${escapeHtml(cardioFields.minutes || "")}" data-cardio-field="minutes" /></label>
+            <label><span>Дистанция</span><input type="text" placeholder="км или м" value="${escapeHtml(cardioFields.distance || "")}" data-cardio-field="distance" /></label>
+            <label><span>Калории</span><input type="number" inputmode="decimal" value="${escapeHtml(cardioFields.calories || "")}" data-cardio-field="calories" /></label>
+          </div>
+        ` : ""}
       </div>
     `;
     const applyRoutineState = (done) => {
@@ -1759,6 +1751,14 @@ function renderRoutineSection(section) {
     row.querySelector(".routine-check").addEventListener("click", (event) => {
       event.stopPropagation();
       toggleRoutine();
+    });
+    row.querySelectorAll("[data-cardio-field]").forEach((input) => {
+      input.addEventListener("click", (event) => event.stopPropagation());
+      input.addEventListener("keydown", (event) => event.stopPropagation());
+      input.addEventListener("input", (event) => {
+        event.stopPropagation();
+        setRoutineCardioField(key, input.dataset.cardioField, event.target.value);
+      });
     });
     list.append(row);
   });
@@ -1822,19 +1822,11 @@ function renderExercise(item, order) {
       </label>
       <div class="strength-fields" aria-label="Подходы и повторы">
         <label>
-          <span>План подходов</span>
-          <input type="text" inputmode="decimal" value="${escapeHtml(strength.targetSets)}" data-strength-field="targetSets" />
-        </label>
-        <label>
-          <span>План повторов</span>
-          <input type="text" value="${escapeHtml(strength.targetReps)}" data-strength-field="targetReps" />
-        </label>
-        <label>
-          <span>Факт подходов</span>
+          <span>Подходы</span>
           <input type="text" inputmode="decimal" value="${escapeHtml(strength.actualSets)}" data-strength-field="actualSets" />
         </label>
         <label>
-          <span>Факт повторов</span>
+          <span>Повторы</span>
           <input type="text" value="${escapeHtml(strength.actualReps)}" data-strength-field="actualReps" />
         </label>
       </div>
@@ -1967,143 +1959,8 @@ function newestFirst(entries) {
   return [...entries].sort((a, b) => new Date(b.date || b.updatedAt || 0) - new Date(a.date || a.updatedAt || 0));
 }
 
-function cardioRecommendation(session) {
-  if (!session) return "Запиши тренировку, чтобы увидеть рекомендацию.";
-  const sameType = newestFirst(cardioResults.sessions || [])
-    .filter((item) => item.machineType === session.machineType && item.perceivedLoad);
-  const lastTwoEasy = sameType.slice(0, 2).length === 2 && sameType.slice(0, 2).every((item) => item.perceivedLoad === "easy");
-  if (lastTwoEasy) return "Легко 2 раза подряд — можно добавить 2-5 минут или +1 уровень.";
-  if (session.perceivedLoad === "easy") return "Легко — если повторится, можно немного увеличить время или уровень.";
-  if (session.perceivedLoad === "normal") return "Норма — оставить текущие параметры.";
-  if (session.perceivedLoad === "hard") return "Тяжело — снизить уровень или время, особенно при высоком пульсе или плохом самочувствии.";
-  return "Отметь нагрузку, чтобы получить рекомендацию.";
-}
-
-function renderCardioTracker() {
-  if (!els.cardioTracker) return;
-  const latest = newestFirst(cardioResults.sessions || [])[0];
-  const selected = cardioMachines.treadmill;
-  els.cardioTracker.innerHTML = `
-    <div class="tracker-header">
-      <div>
-        <p class="eyebrow">Technogym</p>
-        <h2>Кардио</h2>
-        <p>Записывай тренажёр, программу, уровень, время, дистанцию, калории и субъективную нагрузку.</p>
-      </div>
-      <span>${cardioResults.sessions.length} записей</span>
-    </div>
-    <form class="tracker-form cardio-form">
-      <label><span>Дата</span><input name="date" type="date" value="${new Date().toISOString().slice(0, 10)}" /></label>
-      <label>
-        <span>Тренажёр</span>
-        <select name="machineType">
-          ${Object.values(cardioMachines).map((machine) => `<option value="${machine.machineType}">${machine.machineName}</option>`).join("")}
-        </select>
-      </label>
-      <label><span>Программа</span><input name="programName" type="text" value="${selected.programName}" /></label>
-      <label><span>Уровень / мощность</span><input name="level" type="text" value="${selected.level}" /></label>
-      <label><span>Минуты</span><input name="durationMinutes" type="number" inputmode="decimal" step="0.1" value="${selected.durationMinutes}" /></label>
-      <label><span>Дистанция</span><input name="distance" type="text" placeholder="км или м" /></label>
-      <label><span>Калории</span><input name="calories" type="number" inputmode="decimal" /></label>
-      <label><span>Средний пульс</span><input name="avgHeartRate" type="number" inputmode="numeric" /></label>
-      <label><span>Макс. пульс</span><input name="maxHeartRate" type="number" inputmode="numeric" /></label>
-      <label>
-        <span>Как прошло</span>
-        <select name="perceivedLoad">
-          <option value="">Не отмечено</option>
-          ${Object.entries(effortOptions).map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}
-        </select>
-      </label>
-      <label class="is-wide"><span>Заметки</span><textarea name="notes" placeholder="Самочувствие, программа, что поменять"></textarea></label>
-      <button type="submit">Сохранить кардио</button>
-    </form>
-    <div class="tracker-presets">
-      ${Object.values(cardioMachines).map((machine) => `
-        <article>
-          <strong>${machine.machineName}</strong>
-          <span>${machine.programName}${machine.level ? ` · уровень ${machine.level}` : ""} · ${machine.durationMinutes} мин</span>
-        </article>
-      `).join("")}
-    </div>
-    <div class="tracker-summary">
-      <article>
-        <h3>Последняя рекомендация</h3>
-        <p>${cardioRecommendation(latest)}</p>
-      </article>
-      <article>
-        <h3>История кардио</h3>
-        ${cardioResults.sessions.length ? `
-          <ul class="tracker-history">
-            ${newestFirst(cardioResults.sessions).slice(0, 8).map((session) => `
-              <li>
-                <strong>${new Date(session.date).toLocaleDateString("ru-RU")} · ${escapeHtml(cardioMachines[session.machineType]?.machineName || session.machineName || session.machineType)}</strong>
-                <span>${escapeHtml(session.programName || "программа не указана")} · ${escapeHtml(session.durationMinutes || "0")} мин · ${escapeHtml(session.level || "уровень не указан")} · ${escapeHtml(effortReportLabels[session.perceivedLoad] || "не отмечено")}</span>
-              </li>
-            `).join("")}
-          </ul>
-        ` : `<p>История появится после первой кардио-тренировки.</p>`}
-      </article>
-    </div>
-  `;
-
-  const form = els.cardioTracker.querySelector(".cardio-form");
-  form.elements.machineType.addEventListener("change", () => {
-    const machine = cardioMachines[form.elements.machineType.value];
-    form.elements.programName.value = machine.programName;
-    form.elements.level.value = machine.level;
-    form.elements.durationMinutes.value = machine.durationMinutes;
-  });
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const machine = cardioMachines[form.elements.machineType.value];
-    const session = {
-      id: `cardio-${Date.now()}`,
-      date: form.elements.date.value || new Date().toISOString().slice(0, 10),
-      machineType: machine.machineType,
-      machineName: machine.machineName,
-      programName: form.elements.programName.value.trim(),
-      level: form.elements.level.value.trim(),
-      durationMinutes: form.elements.durationMinutes.value,
-      distance: form.elements.distance.value.trim(),
-      calories: form.elements.calories.value,
-      avgHeartRate: form.elements.avgHeartRate.value,
-      maxHeartRate: form.elements.maxHeartRate.value,
-      perceivedLoad: form.elements.perceivedLoad.value,
-      notes: form.elements.notes.value.trim(),
-      updatedAt: new Date().toISOString(),
-    };
-    cardioResults.sessions.push(session);
-    persistCardioResults();
-    renderCardioTracker();
-  });
-}
-
 function latestBodyEntry() {
   return newestFirst(bodyMetrics.entries || [])[0] || { date: new Date().toISOString().slice(0, 10), ...bodyMetricDefaults };
-}
-
-function bodyTrend(key) {
-  const entries = newestFirst(bodyMetrics.entries || []);
-  if (entries.length < 2) return "нет тренда";
-  const latest = Number(entries[0][key]);
-  const previous = Number(entries[1][key]);
-  if (!Number.isFinite(latest) || !Number.isFinite(previous)) return "нет тренда";
-  const diff = latest - previous;
-  if (Math.abs(diff) < 0.05) return "стабильно";
-  return `${diff > 0 ? "+" : ""}${diff.toFixed(1)}`;
-}
-
-function miniBars(key) {
-  const entries = newestFirst(bodyMetrics.entries || []).slice(0, 8).reverse();
-  const values = entries.map((entry) => Number(entry[key])).filter(Number.isFinite);
-  if (!values.length) return "";
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  return entries.map((entry) => {
-    const value = Number(entry[key]);
-    const height = max === min ? 45 : 18 + ((value - min) / (max - min)) * 62;
-    return `<span style="height:${height}px" title="${entry.date}: ${value}"></span>`;
-  }).join("");
 }
 
 function renderBodyTracker() {
@@ -2112,11 +1969,10 @@ function renderBodyTracker() {
   els.bodyTracker.innerHTML = `
     <div class="tracker-header">
       <div>
-        <p class="eyebrow">Ретро-фитнес терминал</p>
+        <p class="eyebrow">Показатели тела</p>
         <h2>Тело</h2>
-        <p>Показатели бытовых весов стоит оценивать по тренду, а не как медицински точные значения.</p>
+        <p>Быстрая запись данных с весов. Показатели бытовых весов лучше смотреть по динамике, а не как медицински точные значения.</p>
       </div>
-      <div class="body-silhouette" aria-hidden="true"><span></span></div>
     </div>
     <div class="body-current">
       ${[
@@ -2127,8 +1983,7 @@ function renderBodyTracker() {
       ].map(([key, label, unit]) => `
         <article>
           <span>${label}</span>
-          <strong>${escapeHtml(latest[key] ?? "—")} ${unit}</strong>
-          <small>тренд: ${escapeHtml(bodyTrend(key))}</small>
+          <strong>${escapeHtml(latest[key] ?? bodyMetricDefaults[key] ?? "—")} ${unit}</strong>
         </article>
       `).join("")}
     </div>
@@ -2143,18 +1998,6 @@ function renderBodyTracker() {
       <label class="is-wide"><span>Заметки</span><textarea name="notes" placeholder="Сон, питание, тренировки, самочувствие">${escapeHtml(latest.notes || "")}</textarea></label>
       <button type="submit">Сохранить показатели</button>
     </form>
-    <div class="body-charts">
-      ${[
-        ["weightKg", "Вес"],
-        ["bodyFatPercent", "Жир"],
-        ["muscleMassKg", "Мышечная масса"],
-      ].map(([key, label]) => `
-        <article>
-          <h3>${label}</h3>
-          <div class="mini-chart">${miniBars(key)}</div>
-        </article>
-      `).join("")}
-    </div>
   `;
 
   els.bodyTracker.querySelector(".body-form").addEventListener("submit", (event) => {
@@ -2482,7 +2325,6 @@ function render() {
   renderHistory();
   renderLoadSummary();
   renderWeeklyReport();
-  renderCardioTracker();
   renderBodyTracker();
 }
 

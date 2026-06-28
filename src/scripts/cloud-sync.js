@@ -62,6 +62,7 @@ function hasMeaningfulData(key, payload) {
     payload.fatigue,
     payload.workingWeights,
     payload.strength,
+    payload.cardio,
   ].some((group) => Object.keys(group || {}).length > 0);
 }
 

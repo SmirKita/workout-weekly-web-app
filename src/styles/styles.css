@@ -669,82 +669,26 @@ main {
   font-weight: 900;
 }
 
-.tracker-presets,
-.tracker-summary,
-.body-current,
-.body-charts {
+.body-current {
   display: grid;
   gap: 10px;
   margin-top: 14px;
 }
 
-.tracker-presets {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.tracker-summary,
-.body-charts {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.tracker-presets article,
-.tracker-summary article,
-.body-current article,
-.body-charts article {
+.body-current article {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #fbfcfa;
   padding: 12px;
 }
 
-.tracker-presets strong,
-.tracker-presets span,
-.tracker-summary h3,
-.tracker-summary p,
 .body-current span,
-.body-current strong,
-.body-current small,
-.body-charts h3 {
+.body-current strong {
   display: block;
 }
 
-.tracker-presets span,
-.tracker-summary p,
-.body-current span,
-.body-current small {
+.body-current span {
   color: var(--muted);
-  font-weight: 750;
-}
-
-.tracker-summary h3,
-.body-charts h3 {
-  margin: 0 0 8px;
-  font-size: 18px;
-}
-
-.tracker-summary p {
-  margin: 0;
-}
-
-.tracker-history {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.tracker-history li {
-  display: grid;
-  gap: 3px;
-  padding: 9px;
-  border-radius: var(--radius);
-  background: #fff;
-}
-
-.tracker-history span {
-  color: var(--muted);
-  font-size: 13px;
   font-weight: 750;
 }
 
@@ -752,26 +696,6 @@ main {
   background:
     linear-gradient(135deg, rgba(35, 123, 130, 0.08), rgba(47, 125, 92, 0.06)),
     var(--surface);
-}
-
-.body-silhouette {
-  flex: 0 0 auto;
-  width: 92px;
-  height: 128px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(35, 123, 130, 0.22);
-  border-radius: 999px 999px 18px 18px;
-  background:
-    radial-gradient(circle at 50% 24%, rgba(35, 123, 130, 0.16) 0 12px, transparent 13px),
-    linear-gradient(180deg, rgba(35, 123, 130, 0.08), rgba(49, 108, 159, 0.08));
-}
-
-.body-silhouette span {
-  width: 44px;
-  height: 72px;
-  border: 2px solid rgba(27, 31, 35, 0.52);
-  border-radius: 28px 28px 20px 20px;
 }
 
 .body-current {
@@ -1530,6 +1454,33 @@ p {
   font-weight: 900;
 }
 
+.routine-cardio-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.routine-cardio-fields label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.routine-cardio-fields input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+  padding: 8px 10px;
+  font: inherit;
+  font-weight: 900;
+}
+
 .routine-entry,
 .routine-warmup {
   border-left: 4px solid var(--orange);
@@ -1708,7 +1659,7 @@ p {
 
 .strength-fields {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -2185,10 +2136,7 @@ details p {
   .weekly-report__progress,
   .weekly-report__stats,
   .weekly-report__lists,
-  .tracker-presets,
-  .tracker-summary,
   .body-current,
-  .body-charts,
   .info-grid {
     grid-template-columns: 1fr;
   }
@@ -2220,11 +2168,6 @@ details p {
 
   .tracker-form button {
     width: 100%;
-  }
-
-  .body-silhouette {
-    width: 78px;
-    height: 104px;
   }
 
   .weekly-report-card {
@@ -2286,6 +2229,10 @@ details p {
     width: 100%;
     min-height: 48px;
     justify-content: center;
+  }
+
+  .routine-cardio-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .exercise-card {
@@ -2380,6 +2327,10 @@ details p {
   }
 
   .strength-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .routine-cardio-fields {
     grid-template-columns: 1fr;
   }
 }
