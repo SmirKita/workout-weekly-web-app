@@ -14,12 +14,16 @@ const currentWeek = getCurrentWeekInfo();
 const progressStorageKey = `workout-progress-${currentWeek.key}`;
 const notesStorageKey = `workout-notes-${currentWeek.key}`;
 const exerciseResultsStorageKey = "workout-exercise-results:v2";
+const cardioResultsStorageKey = "workout-cardio-results:v1";
+const bodyMetricsStorageKey = "workout-body-metrics:v1";
 const authLinkCooldownStorageKey = "workout-sync-auth-link-cooldown-until:v1";
 const syncMetaStorageKey = "workout-sync-meta:v1";
 const backupFileName = "backup-workout-weekly.json";
 const authLinkCooldownMs = 60 * 1000;
 const saved = loadSaved();
 const exerciseResults = loadExerciseResults();
+const cardioResults = loadCardioResults();
+let bodyMetrics;
 let cloudSync = null;
 let authLinkSubmitting = false;
 let authOtpSubmitting = false;
@@ -41,6 +45,8 @@ const els = {
   historyList: document.querySelector("#historyList"),
   loadSummary: document.querySelector("#loadSummary"),
   weeklyReport: document.querySelector("#weeklyReport"),
+  cardioTracker: document.querySelector("#cardioTracker"),
+  bodyTracker: document.querySelector("#bodyTracker"),
   safetyList: document.querySelector("#safetyList"),
   progressionList: document.querySelector("#progressionList"),
   cloudSync: document.querySelector("#cloudSync"),
@@ -82,6 +88,77 @@ const fatigueReportLabels = {
   normal: "нормальная",
   strong: "сильная",
 };
+
+const cardioMachines = {
+  treadmill: {
+    machineType: "treadmill",
+    machineName: "Беговая дорожка Technogym Excite Live Run 7000",
+    programs: ["Выносливость", "Кардио"],
+    programName: "Выносливость",
+    level: "",
+    durationMinutes: 20,
+  },
+  bike: {
+    machineType: "bike",
+    machineName: "Горизонтальный велотренажер Technogym Excite Recline Live 500",
+    programs: ["Укрепление ног"],
+    programName: "Укрепление ног",
+    level: "8",
+    durationMinutes: 20,
+  },
+  elliptical: {
+    machineType: "elliptical",
+    machineName: "Эллиптический тренажер Artis Synchro Live",
+    programs: ["Ручной режим"],
+    programName: "Ручной режим",
+    level: "7",
+    durationMinutes: 20,
+  },
+  rower: {
+    machineType: "rower",
+    machineName: "Гребной тренажер Technogym Skillrow",
+    programs: ["Мощность / сопротивление"],
+    programName: "Мощность / сопротивление",
+    level: "10",
+    durationMinutes: 10,
+  },
+};
+
+const bodyMetricDefaults = {
+  weightKg: 75.5,
+  targetWeightKg: 79.9,
+  bodyFatPercent: 24.4,
+  waterPercent: 50.5,
+  visceralFat: 10.3,
+  subcutaneousFatPercent: 16.4,
+  musclePercent: 70.8,
+  muscleMassKg: 53.45,
+  skeletalMusclePercent: 52,
+  fatFreeMassKg: 57.08,
+  boneMassKg: 2.94,
+  proteinPercent: 21.1,
+  bmrKcal: 1597,
+  biologicalAge: 42,
+};
+
+const bodyMetricFields = [
+  ["weightKg", "Вес", "кг"],
+  ["targetWeightKg", "Цель веса", "кг"],
+  ["bodyFatPercent", "Жир", "%"],
+  ["waterPercent", "Вода", "%"],
+  ["visceralFat", "Висцеральный жир", ""],
+  ["subcutaneousFatPercent", "Подкожный жир", "%"],
+  ["musclePercent", "Мышцы", "%"],
+  ["muscleMassKg", "Мышечная масса", "кг"],
+  ["skeletalMusclePercent", "Скелетные мышцы", "%"],
+  ["fatFreeMassKg", "Безжировая масса", "кг"],
+  ["boneMassKg", "Костная масса", "кг"],
+  ["proteinPercent", "Белок", "%"],
+  ["bmrKcal", "BMR", "ккал"],
+  ["biologicalAge", "Биологический возраст", ""],
+];
+
+bodyMetrics = loadBodyMetrics();
 
 function weekStartFor(date) {
   const value = new Date(date);
@@ -134,6 +211,7 @@ function emptyProgress() {
     feedback: {},
     fatigue: {},
     workingWeights: {},
+    strength: {},
   };
 }
 
@@ -182,6 +260,29 @@ function loadExerciseResults() {
   };
 }
 
+function loadCardioResults() {
+  return loadJson(cardioResultsStorageKey, null) || {
+    version: 1,
+    sessions: [],
+  };
+}
+
+function loadBodyMetrics() {
+  const stored = loadJson(bodyMetricsStorageKey, null);
+  if (stored?.entries?.length) return stored;
+  return {
+    version: 1,
+    entries: [
+      {
+        date: new Date().toISOString().slice(0, 10),
+        ...bodyMetricDefaults,
+        notes: "Стартовые значения",
+      },
+    ],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 function persistExerciseResults({ sync = true, touch = true } = {}) {
   if (touch) exerciseResults.updatedAt = new Date().toISOString();
   localStorage.setItem(exerciseResultsStorageKey, JSON.stringify(exerciseResults));
@@ -192,6 +293,18 @@ function persistExerciseResults({ sync = true, touch = true } = {}) {
       exerciseResults.updatedAt || new Date().toISOString(),
     );
   }
+}
+
+function persistCardioResults({ sync = true, touch = true } = {}) {
+  if (touch) cardioResults.updatedAt = new Date().toISOString();
+  localStorage.setItem(cardioResultsStorageKey, JSON.stringify(cardioResults));
+  if (sync) cloudSync?.markLocalChange(cardioResultsStorageKey, cardioResults, cardioResults.updatedAt || new Date().toISOString());
+}
+
+function persistBodyMetrics({ sync = true, touch = true } = {}) {
+  if (touch) bodyMetrics.updatedAt = new Date().toISOString();
+  localStorage.setItem(bodyMetricsStorageKey, JSON.stringify(bodyMetrics));
+  if (sync) cloudSync?.markLocalChange(bodyMetricsStorageKey, bodyMetrics, bodyMetrics.updatedAt || new Date().toISOString());
 }
 
 function exerciseById(exerciseId) {
@@ -267,6 +380,7 @@ function persist({ sync = true, touch = true } = {}) {
     feedback: saved.feedback || {},
     fatigue: saved.fatigue || {},
     workingWeights: saved.workingWeights || {},
+    strength: saved.strength || {},
     updatedAt,
   };
   const notesPayload = saved.notes || {};
@@ -318,6 +432,12 @@ function inferredStorageUpdatedAt(key, payload) {
   if (syncMeta[key]) return syncMeta[key];
   if (payload && typeof payload === "object" && payload.updatedAt) return payload.updatedAt;
   if (key === exerciseResultsStorageKey) return latestExerciseHistoryDate(payload);
+  if (key === cardioResultsStorageKey) {
+    return payload?.sessions?.map((entry) => entry.updatedAt || entry.date).filter(Boolean).sort().at(-1) || "";
+  }
+  if (key === bodyMetricsStorageKey) {
+    return payload?.entries?.map((entry) => entry.updatedAt || entry.date).filter(Boolean).sort().at(-1) || "";
+  }
   if (key.startsWith("workout-notes-")) {
     const pairedProgress = storagePayload(key.replace("workout-notes-", "workout-progress-"));
     if (pairedProgress?.updatedAt) return pairedProgress.updatedAt;
@@ -400,7 +520,9 @@ function applyRemoteData(keys) {
   const affectsCurrentProgress = keys.includes(progressStorageKey);
   const affectsCurrentNotes = keys.includes(notesStorageKey);
   const affectsResults = keys.includes(exerciseResultsStorageKey);
-  if (!affectsCurrentProgress && !affectsCurrentNotes && !affectsResults) {
+  const affectsCardio = keys.includes(cardioResultsStorageKey);
+  const affectsBody = keys.includes(bodyMetricsStorageKey);
+  if (!affectsCurrentProgress && !affectsCurrentNotes && !affectsResults && !affectsCardio && !affectsBody) {
     renderHistory();
     renderWeeklyReport();
     return;
@@ -411,6 +533,8 @@ function applyRemoteData(keys) {
   const focusedElement = document.activeElement;
   if (affectsCurrentProgress || affectsCurrentNotes) replaceObject(saved, loadSaved());
   if (affectsResults) replaceObject(exerciseResults, loadExerciseResults());
+  if (affectsCardio) replaceObject(cardioResults, loadCardioResults());
+  if (affectsBody) replaceObject(bodyMetrics, loadBodyMetrics());
   syncAllDayCompletion();
   render();
   requestAnimationFrame(() => {
@@ -542,6 +666,51 @@ function weightText(weight) {
   return weight.start || "уточнить";
 }
 
+function targetFromSets(value) {
+  const text = String(value || "");
+  const match = /(\d+)\s*[x×х]\s*([\d,.]+(?:\s*[-–]\s*[\d,.]+)?|[^\s]+)/i.exec(text);
+  if (!match) {
+    const timeMatch = /(\d+)\s*(сек|мин)/i.exec(text);
+    return {
+      targetSets: timeMatch ? 1 : 3,
+      targetReps: timeMatch ? `${timeMatch[1]} ${timeMatch[2]}` : "12",
+      minReps: timeMatch ? Number(timeMatch[1]) : 12,
+      maxReps: timeMatch ? Number(timeMatch[1]) : 12,
+      unit: timeMatch?.[2] || "повт.",
+    };
+  }
+  const repsText = match[2].replace(",", ".").replace(/\s+/g, "");
+  const numbers = repsText.match(/\d+(?:\.\d+)?/g)?.map(Number) || [];
+  return {
+    targetSets: Number(match[1]) || 3,
+    targetReps: repsText,
+    minReps: numbers[0] || 12,
+    maxReps: numbers.at(-1) || numbers[0] || 12,
+    unit: /сек|мин/i.test(repsText) ? "" : "повт.",
+  };
+}
+
+function strengthForExercise(exercise) {
+  const target = targetFromSets(exercise?.sets);
+  const stored = saved.strength?.[exercise.id] || {};
+  return {
+    targetSets: stored.targetSets || target.targetSets,
+    targetReps: stored.targetReps || target.targetReps,
+    actualSets: stored.actualSets || target.targetSets,
+    actualReps: stored.actualReps || target.maxReps,
+    minReps: target.minReps,
+    maxReps: target.maxReps,
+    unit: target.unit,
+  };
+}
+
+function performanceText(entry) {
+  if (!entry) return "";
+  const sets = entry.actualSets || entry.targetSets || "";
+  const reps = entry.actualReps || entry.targetReps || "";
+  return sets && reps ? `${sets} x ${reps}` : "";
+}
+
 function weightForSource(exercise, source, usePersistentFallback = false) {
   return source.workingWeights?.[exercise.id]
     || (usePersistentFallback ? resultForExercise(exercise.id).workingWeight : "")
@@ -660,7 +829,9 @@ function hasStoredProgress(source) {
     Object.values(source.days || {}).some(Boolean) ||
       Object.values(source.exercises || {}).some(Boolean) ||
       Object.values(source.feedback || {}).some(Boolean) ||
-      Object.values(source.fatigue || {}).some(Boolean),
+      Object.values(source.fatigue || {}).some(Boolean) ||
+      Object.values(source.workingWeights || {}).some(Boolean) ||
+      Object.values(source.strength || {}).some(Boolean),
   );
 }
 
@@ -800,7 +971,9 @@ function weeklyReportText(model) {
     lines.push("", "Основная часть:");
     dayEntries.forEach((exercise) => {
       const entry = model.entries.find((item) => item.exercise.id === exercise.id);
-      lines.push(`— ${exercise.title} — ${entry?.weight || weightText(exercise.weight)} — ${effortReportLabels[model.source.feedback?.[exercise.id]] || "не отмечено"}`);
+      const strength = model.source.strength?.[exercise.id] || {};
+      const performance = performanceText(strength);
+      lines.push(`— ${exercise.title} — ${entry?.weight || weightText(exercise.weight)}${performance ? ` — ${performance}` : ""} — ${effortReportLabels[model.source.feedback?.[exercise.id]] || "не отмечено"}`);
     });
   });
 
@@ -1080,16 +1253,37 @@ function recommendationFromFeedback(feedback) {
   return "После упражнения отметь нагрузку, чтобы получить рекомендацию.";
 }
 
+function strengthRecommendation(exerciseId, feedback) {
+  const exercise = exerciseById(exerciseId);
+  const strength = exercise ? strengthForExercise(exercise) : {};
+  const actualReps = Number(strength.actualReps || 0);
+  if (feedback === "easy" && actualReps >= Number(strength.maxReps || 0)) {
+    return "Легко и верх повторов выполнен — можно немного увеличить вес, если техника чистая.";
+  }
+  if (feedback === "easy") return "Легко — понаблюдать ещё раз или добавить повторы до верхней границы.";
+  if (feedback === "normal") return "Норма — оставить текущий вес.";
+  if (feedback === "hard" || actualReps < Number(strength.minReps || 0)) {
+    return "Тяжело или нижняя граница не выполнена — вес не повышать.";
+  }
+  return recommendationFromFeedback(feedback);
+}
+
 function saveExerciseResult(exerciseId, feedback) {
   const result = resultForExercise(exerciseId);
   const weight = workingWeightFor(exerciseId);
+  const exercise = exerciseById(exerciseId);
   const day = dayForExercise(exerciseId);
+  const strength = exercise ? strengthForExercise(exercise) : {};
   const existing = result.history.find((entry) => entry.weekKey === currentWeek.key);
   const entry = {
     date: new Date().toISOString(),
     weekKey: currentWeek.key,
     dayId: day?.id || "",
     weight,
+    targetSets: strength.targetSets,
+    targetReps: strength.targetReps,
+    actualSets: strength.actualSets,
+    actualReps: strength.actualReps,
     feedback,
   };
   if (existing) Object.assign(existing, entry);
@@ -1112,6 +1306,26 @@ function setExerciseWeight(exerciseId, weight) {
   }
   persist();
   persistExerciseResults();
+}
+
+function setExerciseStrengthField(exerciseId, field, value) {
+  const exercise = exerciseById(exerciseId);
+  if (!exercise) return;
+  const current = strengthForExercise(exercise);
+  saved.strength[exerciseId] = {
+    targetSets: current.targetSets,
+    targetReps: current.targetReps,
+    actualSets: current.actualSets,
+    actualReps: current.actualReps,
+    [field]: String(value).trim(),
+  };
+  const currentEntry = resultForExercise(exerciseId).history.find((entry) => entry.weekKey === currentWeek.key);
+  if (currentEntry) {
+    currentEntry[field] = String(value).trim();
+    currentEntry.date = new Date().toISOString();
+    persistExerciseResults();
+  }
+  persist();
 }
 
 function setExerciseFeedback(exerciseId, value, anchor = null) {
@@ -1592,6 +1806,7 @@ function renderExercise(item, order) {
   const renderResultPanel = () => {
     const previous = previousResultFor(item.id);
     const result = resultForExercise(item.id);
+    const strength = strengthForExercise(item);
     const currentFeedback = saved.feedback?.[item.id] || "";
     const recommendationFeedback = currentFeedback || previous?.feedback || "";
     const history = [...(result.history || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -1605,15 +1820,33 @@ function renderExercise(item, order) {
           aria-label="Рабочий вес: ${escapeHtml(item.title)}"
         />
       </label>
+      <div class="strength-fields" aria-label="Подходы и повторы">
+        <label>
+          <span>План подходов</span>
+          <input type="text" inputmode="decimal" value="${escapeHtml(strength.targetSets)}" data-strength-field="targetSets" />
+        </label>
+        <label>
+          <span>План повторов</span>
+          <input type="text" value="${escapeHtml(strength.targetReps)}" data-strength-field="targetReps" />
+        </label>
+        <label>
+          <span>Факт подходов</span>
+          <input type="text" inputmode="decimal" value="${escapeHtml(strength.actualSets)}" data-strength-field="actualSets" />
+        </label>
+        <label>
+          <span>Факт повторов</span>
+          <input type="text" value="${escapeHtml(strength.actualReps)}" data-strength-field="actualReps" />
+        </label>
+      </div>
       <p class="previous-result">
         <strong>Прошлый результат:</strong>
         ${
           previous
-            ? `${escapeHtml(previous.weight)} · ${escapeHtml(effortReportLabels[previous.feedback] || "не отмечено")}`
+            ? `${escapeHtml(previous.weight)} · ${escapeHtml(performanceText(previous) || "подходы не указаны")} · ${escapeHtml(effortReportLabels[previous.feedback] || "не отмечено")}`
             : "пока нет данных"
         }
       </p>
-      <p class="exercise-recommendation">${escapeHtml(recommendationFromFeedback(recommendationFeedback))}</p>
+      <p class="exercise-recommendation">${escapeHtml(strengthRecommendation(item.id, recommendationFeedback))}</p>
       <details class="exercise-history">
         <summary>История упражнения (${history.length})</summary>
         ${
@@ -1622,6 +1855,7 @@ function renderExercise(item, order) {
                 <li>
                   <time datetime="${escapeHtml(entry.date)}">${new Date(entry.date).toLocaleDateString("ru-RU")}</time>
                   <span>${escapeHtml(entry.weight)}</span>
+                  <span>${escapeHtml(performanceText(entry) || "—")}</span>
                   <strong>${escapeHtml(effortReportLabels[entry.feedback] || "не отмечено")}</strong>
                 </li>
               `).join("")}</ul>`
@@ -1635,6 +1869,14 @@ function renderExercise(item, order) {
     weightInput.addEventListener("input", (event) => {
       event.stopPropagation();
       setExerciseWeight(item.id, event.target.value);
+    });
+    resultPanel.querySelectorAll("[data-strength-field]").forEach((input) => {
+      input.addEventListener("click", (event) => event.stopPropagation());
+      input.addEventListener("keydown", (event) => event.stopPropagation());
+      input.addEventListener("input", (event) => {
+        event.stopPropagation();
+        setExerciseStrengthField(item.id, input.dataset.strengthField, event.target.value);
+      });
     });
     resultPanel.querySelector("details").addEventListener("click", (event) => event.stopPropagation());
     resultPanel.querySelector("details").addEventListener("keydown", (event) => event.stopPropagation());
@@ -1721,16 +1963,231 @@ function renderExercise(item, order) {
   return node;
 }
 
+function newestFirst(entries) {
+  return [...entries].sort((a, b) => new Date(b.date || b.updatedAt || 0) - new Date(a.date || a.updatedAt || 0));
+}
+
+function cardioRecommendation(session) {
+  if (!session) return "Запиши тренировку, чтобы увидеть рекомендацию.";
+  const sameType = newestFirst(cardioResults.sessions || [])
+    .filter((item) => item.machineType === session.machineType && item.perceivedLoad);
+  const lastTwoEasy = sameType.slice(0, 2).length === 2 && sameType.slice(0, 2).every((item) => item.perceivedLoad === "easy");
+  if (lastTwoEasy) return "Легко 2 раза подряд — можно добавить 2-5 минут или +1 уровень.";
+  if (session.perceivedLoad === "easy") return "Легко — если повторится, можно немного увеличить время или уровень.";
+  if (session.perceivedLoad === "normal") return "Норма — оставить текущие параметры.";
+  if (session.perceivedLoad === "hard") return "Тяжело — снизить уровень или время, особенно при высоком пульсе или плохом самочувствии.";
+  return "Отметь нагрузку, чтобы получить рекомендацию.";
+}
+
+function renderCardioTracker() {
+  if (!els.cardioTracker) return;
+  const latest = newestFirst(cardioResults.sessions || [])[0];
+  const selected = cardioMachines.treadmill;
+  els.cardioTracker.innerHTML = `
+    <div class="tracker-header">
+      <div>
+        <p class="eyebrow">Technogym</p>
+        <h2>Кардио</h2>
+        <p>Записывай тренажёр, программу, уровень, время, дистанцию, калории и субъективную нагрузку.</p>
+      </div>
+      <span>${cardioResults.sessions.length} записей</span>
+    </div>
+    <form class="tracker-form cardio-form">
+      <label><span>Дата</span><input name="date" type="date" value="${new Date().toISOString().slice(0, 10)}" /></label>
+      <label>
+        <span>Тренажёр</span>
+        <select name="machineType">
+          ${Object.values(cardioMachines).map((machine) => `<option value="${machine.machineType}">${machine.machineName}</option>`).join("")}
+        </select>
+      </label>
+      <label><span>Программа</span><input name="programName" type="text" value="${selected.programName}" /></label>
+      <label><span>Уровень / мощность</span><input name="level" type="text" value="${selected.level}" /></label>
+      <label><span>Минуты</span><input name="durationMinutes" type="number" inputmode="decimal" step="0.1" value="${selected.durationMinutes}" /></label>
+      <label><span>Дистанция</span><input name="distance" type="text" placeholder="км или м" /></label>
+      <label><span>Калории</span><input name="calories" type="number" inputmode="decimal" /></label>
+      <label><span>Средний пульс</span><input name="avgHeartRate" type="number" inputmode="numeric" /></label>
+      <label><span>Макс. пульс</span><input name="maxHeartRate" type="number" inputmode="numeric" /></label>
+      <label>
+        <span>Как прошло</span>
+        <select name="perceivedLoad">
+          <option value="">Не отмечено</option>
+          ${Object.entries(effortOptions).map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}
+        </select>
+      </label>
+      <label class="is-wide"><span>Заметки</span><textarea name="notes" placeholder="Самочувствие, программа, что поменять"></textarea></label>
+      <button type="submit">Сохранить кардио</button>
+    </form>
+    <div class="tracker-presets">
+      ${Object.values(cardioMachines).map((machine) => `
+        <article>
+          <strong>${machine.machineName}</strong>
+          <span>${machine.programName}${machine.level ? ` · уровень ${machine.level}` : ""} · ${machine.durationMinutes} мин</span>
+        </article>
+      `).join("")}
+    </div>
+    <div class="tracker-summary">
+      <article>
+        <h3>Последняя рекомендация</h3>
+        <p>${cardioRecommendation(latest)}</p>
+      </article>
+      <article>
+        <h3>История кардио</h3>
+        ${cardioResults.sessions.length ? `
+          <ul class="tracker-history">
+            ${newestFirst(cardioResults.sessions).slice(0, 8).map((session) => `
+              <li>
+                <strong>${new Date(session.date).toLocaleDateString("ru-RU")} · ${escapeHtml(cardioMachines[session.machineType]?.machineName || session.machineName || session.machineType)}</strong>
+                <span>${escapeHtml(session.programName || "программа не указана")} · ${escapeHtml(session.durationMinutes || "0")} мин · ${escapeHtml(session.level || "уровень не указан")} · ${escapeHtml(effortReportLabels[session.perceivedLoad] || "не отмечено")}</span>
+              </li>
+            `).join("")}
+          </ul>
+        ` : `<p>История появится после первой кардио-тренировки.</p>`}
+      </article>
+    </div>
+  `;
+
+  const form = els.cardioTracker.querySelector(".cardio-form");
+  form.elements.machineType.addEventListener("change", () => {
+    const machine = cardioMachines[form.elements.machineType.value];
+    form.elements.programName.value = machine.programName;
+    form.elements.level.value = machine.level;
+    form.elements.durationMinutes.value = machine.durationMinutes;
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const machine = cardioMachines[form.elements.machineType.value];
+    const session = {
+      id: `cardio-${Date.now()}`,
+      date: form.elements.date.value || new Date().toISOString().slice(0, 10),
+      machineType: machine.machineType,
+      machineName: machine.machineName,
+      programName: form.elements.programName.value.trim(),
+      level: form.elements.level.value.trim(),
+      durationMinutes: form.elements.durationMinutes.value,
+      distance: form.elements.distance.value.trim(),
+      calories: form.elements.calories.value,
+      avgHeartRate: form.elements.avgHeartRate.value,
+      maxHeartRate: form.elements.maxHeartRate.value,
+      perceivedLoad: form.elements.perceivedLoad.value,
+      notes: form.elements.notes.value.trim(),
+      updatedAt: new Date().toISOString(),
+    };
+    cardioResults.sessions.push(session);
+    persistCardioResults();
+    renderCardioTracker();
+  });
+}
+
+function latestBodyEntry() {
+  return newestFirst(bodyMetrics.entries || [])[0] || { date: new Date().toISOString().slice(0, 10), ...bodyMetricDefaults };
+}
+
+function bodyTrend(key) {
+  const entries = newestFirst(bodyMetrics.entries || []);
+  if (entries.length < 2) return "нет тренда";
+  const latest = Number(entries[0][key]);
+  const previous = Number(entries[1][key]);
+  if (!Number.isFinite(latest) || !Number.isFinite(previous)) return "нет тренда";
+  const diff = latest - previous;
+  if (Math.abs(diff) < 0.05) return "стабильно";
+  return `${diff > 0 ? "+" : ""}${diff.toFixed(1)}`;
+}
+
+function miniBars(key) {
+  const entries = newestFirst(bodyMetrics.entries || []).slice(0, 8).reverse();
+  const values = entries.map((entry) => Number(entry[key])).filter(Number.isFinite);
+  if (!values.length) return "";
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return entries.map((entry) => {
+    const value = Number(entry[key]);
+    const height = max === min ? 45 : 18 + ((value - min) / (max - min)) * 62;
+    return `<span style="height:${height}px" title="${entry.date}: ${value}"></span>`;
+  }).join("");
+}
+
+function renderBodyTracker() {
+  if (!els.bodyTracker) return;
+  const latest = latestBodyEntry();
+  els.bodyTracker.innerHTML = `
+    <div class="tracker-header">
+      <div>
+        <p class="eyebrow">Ретро-фитнес терминал</p>
+        <h2>Тело</h2>
+        <p>Показатели бытовых весов стоит оценивать по тренду, а не как медицински точные значения.</p>
+      </div>
+      <div class="body-silhouette" aria-hidden="true"><span></span></div>
+    </div>
+    <div class="body-current">
+      ${[
+        ["weightKg", "Вес", "кг"],
+        ["targetWeightKg", "Цель", "кг"],
+        ["bodyFatPercent", "Жир", "%"],
+        ["muscleMassKg", "Мышцы", "кг"],
+      ].map(([key, label, unit]) => `
+        <article>
+          <span>${label}</span>
+          <strong>${escapeHtml(latest[key] ?? "—")} ${unit}</strong>
+          <small>тренд: ${escapeHtml(bodyTrend(key))}</small>
+        </article>
+      `).join("")}
+    </div>
+    <form class="tracker-form body-form">
+      <label><span>Дата</span><input name="date" type="date" value="${new Date().toISOString().slice(0, 10)}" /></label>
+      ${bodyMetricFields.map(([key, label, unit]) => `
+        <label>
+          <span>${label}${unit ? `, ${unit}` : ""}</span>
+          <input name="${key}" type="number" inputmode="decimal" step="0.01" value="${escapeHtml(latest[key] ?? "")}" />
+        </label>
+      `).join("")}
+      <label class="is-wide"><span>Заметки</span><textarea name="notes" placeholder="Сон, питание, тренировки, самочувствие">${escapeHtml(latest.notes || "")}</textarea></label>
+      <button type="submit">Сохранить показатели</button>
+    </form>
+    <div class="body-charts">
+      ${[
+        ["weightKg", "Вес"],
+        ["bodyFatPercent", "Жир"],
+        ["muscleMassKg", "Мышечная масса"],
+      ].map(([key, label]) => `
+        <article>
+          <h3>${label}</h3>
+          <div class="mini-chart">${miniBars(key)}</div>
+        </article>
+      `).join("")}
+    </div>
+  `;
+
+  els.bodyTracker.querySelector(".body-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const entry = {
+      date: form.elements.date.value || new Date().toISOString().slice(0, 10),
+      updatedAt: new Date().toISOString(),
+      notes: form.elements.notes.value.trim(),
+    };
+    bodyMetricFields.forEach(([key]) => {
+      const value = form.elements[key].value;
+      entry[key] = value === "" ? "" : Number(value);
+    });
+    const existingIndex = bodyMetrics.entries.findIndex((item) => item.date === entry.date);
+    if (existingIndex >= 0) bodyMetrics.entries[existingIndex] = { ...bodyMetrics.entries[existingIndex], ...entry };
+    else bodyMetrics.entries.push(entry);
+    persistBodyMetrics();
+    renderBodyTracker();
+  });
+}
+
 function renderLists() {
   els.safetyList.innerHTML = safety.map((item) => `<li>${item}</li>`).join("");
   els.progressionList.innerHTML = progression.map((item) => `<li>${item}</li>`).join("");
 }
 
-function renderCloudSyncStatus({ configured, status, message, user, online, diagnostics }) {
+function renderCloudSyncStatus({ configured, status, message, user, online, diagnostics, outboxCount = 0 }) {
   if (!els.cloudSync) return;
-  lastCloudSyncPayload = { configured, status, message, user, online, diagnostics };
+  lastCloudSyncPayload = { configured, status, message, user, online, diagnostics, outboxCount };
   const signedIn = Boolean(user);
   const cooldownSeconds = authLinkCooldownSeconds();
+  const hasUnsynced = outboxCount > 0;
   const statusText = message || {
     unconfigured: "Нужно добавить настройки Supabase",
     "signed-out": "Войдите, чтобы синхронизировать устройства",
@@ -1749,7 +2206,9 @@ function renderCloudSyncStatus({ configured, status, message, user, online, diag
 
   els.cloudSync.dataset.status = status;
   els.cloudSync.querySelector(".cloud-sync__status").textContent =
-    !signedIn && configured && cooldownSeconds > 0 && status !== "error" ? authStatusText : statusText;
+    signedIn && hasUnsynced && status !== "syncing" && status !== "error"
+      ? "Есть несинхронизированные изменения"
+      : !signedIn && configured && cooldownSeconds > 0 && status !== "error" ? authStatusText : statusText;
   els.cloudSync.querySelector(".cloud-sync__account").textContent = signedIn ? user.email : "";
   els.cloudSync.querySelector(".cloud-sync__login").hidden = signedIn || !configured;
   els.cloudSync.querySelector(".cloud-sync__session").hidden = !signedIn;
@@ -2023,6 +2482,8 @@ function render() {
   renderHistory();
   renderLoadSummary();
   renderWeeklyReport();
+  renderCardioTracker();
+  renderBodyTracker();
 }
 
 els.searchInput.addEventListener("input", (event) => {
@@ -2041,5 +2502,8 @@ els.todayButton.addEventListener("click", () => selectDay(todayWorkoutId()));
 renderLists();
 syncAllDayCompletion();
 persist({ sync: false, touch: false });
+if (!localStorage.getItem(bodyMetricsStorageKey)) {
+  persistBodyMetrics({ sync: false, touch: false });
+}
 render();
 initCloudSync();

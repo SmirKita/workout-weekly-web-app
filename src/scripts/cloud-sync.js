@@ -33,6 +33,8 @@ function newestHistoryDate(payload) {
 function inferredUpdatedAt(key, payload) {
   if (payload?.updatedAt) return payload.updatedAt;
   if (key === "workout-exercise-results:v2") return newestHistoryDate(payload);
+  if (key === "workout-cardio-results:v1") return payload.sessions?.map((entry) => entry.updatedAt || entry.date).filter(Boolean).sort().at(-1) || "";
+  if (key === "workout-body-metrics:v1") return payload.entries?.map((entry) => entry.updatedAt || entry.date).filter(Boolean).sort().at(-1) || "";
   if (key.startsWith("workout-notes-")) {
     const progress = loadJson(key.replace("workout-notes-", "workout-progress-"), {});
     if (progress.updatedAt) return progress.updatedAt;
@@ -48,11 +50,18 @@ function hasMeaningfulData(key, payload) {
   if (key === "workout-exercise-results:v2") {
     return Object.keys(payload.exercises || {}).length > 0;
   }
+  if (key === "workout-cardio-results:v1") {
+    return (payload.sessions || []).length > 0;
+  }
+  if (key === "workout-body-metrics:v1") {
+    return (payload.entries || []).length > 0;
+  }
   return [
     payload.exercises,
     payload.feedback,
     payload.fatigue,
     payload.workingWeights,
+    payload.strength,
   ].some((group) => Object.keys(group || {}).length > 0);
 }
 
@@ -159,6 +168,7 @@ export function createWorkoutCloudSync({ onStatus, onRemoteApplied } = {}) {
     message,
     user,
     online: navigator.onLine,
+    outboxCount: Object.keys(loadJson(OUTBOX_KEY, {})).length,
     diagnostics: lastRequest || {
       supabaseUrl: supabaseUrl || stripWrappingQuotes(rawSupabaseUrl),
       requestUrl: "",
@@ -176,6 +186,7 @@ export function createWorkoutCloudSync({ onStatus, onRemoteApplied } = {}) {
     outbox[recordKey] = { recordKey, payload, updatedAt };
     saveJson(META_KEY, meta);
     saveJson(OUTBOX_KEY, outbox);
+    if (user && !syncing) report(navigator.onLine ? "ready" : "offline");
     scheduleSync();
   }
 
