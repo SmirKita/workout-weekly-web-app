@@ -21,7 +21,7 @@ const syncMetaStorageKey = "workout-sync-meta:v1";
 const backupFileName = "backup-workout-weekly.json";
 const authLinkCooldownMs = 60 * 1000;
 const saved = loadSaved();
-const exerciseResults = loadExerciseResults();
+let exerciseResults;
 const cardioResults = loadCardioResults();
 let bodyMetrics;
 let cloudSync = null;
@@ -87,6 +87,41 @@ const fatigueReportLabels = {
   normal: "нормальная",
   strong: "сильная",
 };
+
+const backupWorkout2Results = {
+  "leg-press": ["60 кг", "normal"],
+  "leg-extension": ["25 кг", "normal"],
+  "lying-leg-curl": ["20 кг", "normal"],
+  "hip-thrust": ["10 кг", "normal"],
+  "romanian-deadlift": ["14 кг / рука", "normal"],
+  "pallof-press": ["10 кг", "normal"],
+  "lat-pulldown": ["40 кг", "normal"],
+  "seated-row": ["35 кг", "normal"],
+  "chest-press": ["35 кг", "normal"],
+  "reverse-fly": ["15 кг", "normal"],
+  "face-pull-wed": ["15 кг", "normal"],
+  "straight-arm-pulldown": ["15 кг", "normal"],
+  "shoulder-press": ["8 кг / рука", "easy"],
+  "lateral-raise": ["5 кг / рука", "normal"],
+  "face-pull-sat": ["15 кг", "normal"],
+  "biceps-curl": ["8 кг / рука", "normal"],
+  "triceps-pushdown": ["15 кг", "easy"],
+  "hammer-curl": ["7 кг / рука", "easy"],
+  "biceps-curl-machine": ["15 кг", "hard"],
+  "front-raise": ["5 кг / рука", "normal"],
+  "close-grip-push-up": ["Без веса", "normal"],
+  plank: ["Без веса", "normal"],
+  "side-plank": ["Без веса", "normal"],
+  crunches: ["Без веса", "normal"],
+  "leg-raise": ["Без веса", "normal"],
+  "russian-twist": ["5 кг", "normal"],
+  "dead-bug": ["Без веса", "normal"],
+  superman: ["Без веса", "normal"],
+  "bird-dog": ["Без веса", "normal"],
+  "suitcase-carry": ["14 кг / сторона", ""],
+};
+
+exerciseResults = loadExerciseResults();
 
 const bodyMetricDefaults = {
   weightKg: 75.5,
@@ -218,10 +253,44 @@ function loadSaved() {
 
 function loadExerciseResults() {
   const stored = loadJson(exerciseResultsStorageKey, null);
-  return stored || {
+  const results = stored || {
     version: 2,
     exercises: {},
   };
+  const migrated = applyBackupWorkout2Results(results);
+  if (migrated.changed) {
+    saveJson(exerciseResultsStorageKey, migrated.results);
+  }
+  return migrated.results;
+}
+
+function applyBackupWorkout2Results(results) {
+  const migrationKey = "backup-workout-weekly-2";
+  if (results.migrations?.[migrationKey]) {
+    return { changed: false, results };
+  }
+
+  const merged = {
+    version: 2,
+    ...results,
+    exercises: { ...(results.exercises || {}) },
+    migrations: {
+      ...(results.migrations || {}),
+      [migrationKey]: true,
+    },
+  };
+
+  Object.entries(backupWorkout2Results).forEach(([exerciseId, [workingWeight, latestFeedback]]) => {
+    const existing = merged.exercises[exerciseId] || {};
+    merged.exercises[exerciseId] = {
+      ...existing,
+      workingWeight,
+      latestFeedback: latestFeedback || existing.latestFeedback || "",
+      history: existing.history || [],
+    };
+  });
+
+  return { changed: true, results: merged };
 }
 
 function loadCardioResults() {
@@ -1206,11 +1275,16 @@ function workingWeightFor(exerciseId) {
 }
 
 function previousResultFor(exerciseId) {
-  const history = resultForExercise(exerciseId).history || [];
+  const result = resultForExercise(exerciseId);
+  const history = result.history || [];
   const previous = [...history]
     .filter((entry) => entry.weekKey !== currentWeek.key)
     .sort((a, b) => new Date(b.date) - new Date(a.date));
-  return previous[0] || null;
+  return previous[0] || (
+    result.latestFeedback
+      ? { weight: result.workingWeight, feedback: result.latestFeedback }
+      : null
+  );
 }
 
 function recommendationFromFeedback(feedback) {
