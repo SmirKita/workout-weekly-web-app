@@ -30,6 +30,27 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Apply startup patch before build
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'src/scripts/app.js';
+          let source = fs.readFileSync(file, 'utf8');
+          source = source.replace(
+            '\nlet lastCloudSyncPayload = null;\nmigrateWeeklyResults();\nconst baseUrl = import.meta.env.BASE_URL;',
+            '\nlet lastCloudSyncPayload = null;\nconst baseUrl = import.meta.env.BASE_URL;',
+          );
+          source = source.replace(
+            'bodyMetrics = loadBodyMetrics();\n\nfunction weekStartFor(date) {',
+            'bodyMetrics = loadBodyMetrics();\nmigrateWeeklyResults();\n\nfunction weekStartFor(date) {',
+          );
+          source = source.replace(
+            'saveJson(exerciseResultsStorageKey, migrated.results);',
+            'localStorage.setItem(exerciseResultsStorageKey, JSON.stringify(migrated.results));',
+          );
+          fs.writeFileSync(file, source);
+          NODE
+
       - name: Build
         run: npm run build
         env:
