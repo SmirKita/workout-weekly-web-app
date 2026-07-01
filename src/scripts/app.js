@@ -29,7 +29,6 @@ let authLinkSubmitting = false;
 let authOtpSubmitting = false;
 let authLinkCooldownTimer = null;
 let lastCloudSyncPayload = null;
-migrateWeeklyResults();
 const baseUrl = import.meta.env.BASE_URL;
 
 const els = {
@@ -157,6 +156,7 @@ const bodyMetricFields = [
 ];
 
 bodyMetrics = loadBodyMetrics();
+migrateWeeklyResults();
 
 function weekStartFor(date) {
   const value = new Date(date);
@@ -259,7 +259,7 @@ function loadExerciseResults() {
   };
   const migrated = applyBackupWorkout2Results(results);
   if (migrated.changed) {
-    saveJson(exerciseResultsStorageKey, migrated.results);
+    localStorage.setItem(exerciseResultsStorageKey, JSON.stringify(migrated.results));
   }
   return migrated.results;
 }
