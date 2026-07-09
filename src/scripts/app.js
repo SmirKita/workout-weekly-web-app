@@ -117,7 +117,6 @@ const backupWorkout2Results = {
   "dead-bug": ["Без веса", "normal"],
   superman: ["Без веса", "normal"],
   "bird-dog": ["Без веса", "normal"],
-  "suitcase-carry": ["14 кг / сторона", ""],
 };
 
 exerciseResults = loadExerciseResults();
@@ -1405,7 +1404,7 @@ function cardioCaloriesFor(minutes) {
 function cardioDefaultLevel(key, item) {
   const title = normalize(item.title);
   if (key.startsWith("mon-entry")) return "8";
-  if (key.startsWith("thu-entry")) return "7";
+  if (key.startsWith("thu-entry")) return "6";
   if (title.includes("эллипс")) return "7";
   if (title.includes("греб")) return "10";
   if (title.includes("велотренаж")) return "8";
@@ -1414,6 +1413,14 @@ function cardioDefaultLevel(key, item) {
 
 function cardioDefaultsFor(key, item) {
   const minutes = cardioDefaultMinutes(item.amount);
+  if (key.startsWith("thu-entry")) {
+    return {
+      level: "6",
+      minutes: "30",
+      distance: "2.0-2.4 км",
+      calories: "140-180",
+    };
+  }
   return {
     level: cardioDefaultLevel(key, item),
     minutes,
