@@ -52,7 +52,7 @@ const els = {
 
 const metricHelp = {
   "Подходы/повторы": "Например, 3x10-12 означает: 3 подхода по 10-12 повторений.",
-  Вес: "Рабочий стартовый вес на эту неделю. Выполни упражнение по плану и отметь, как прошло: легко, норма или тяжело. В конце недели по отметкам скорректируем вес.",
+  Вес: "Рабочий стартовый вес на эту неделю. Выполни упражнение по плану и отметь нагрузку по шкале от «Легко» до «Тяжело». В конце недели по отметкам скорректируем вес.",
   "RPE/RIR": "RPE — насколько тяжело по ощущениям. RIR — сколько повторов осталось в запасе.",
   Отдых: "Пауза между подходами перед следующим рабочим подходом.",
 };
@@ -63,11 +63,40 @@ const groupLabels = {
   finish: "Завершение",
 };
 
-const effortOptions = {
-  easy: "Легко",
-  normal: "Норма",
-  hard: "Тяжело",
-};
+const effortLevels = [
+  {
+    value: "easy",
+    label: "Легко",
+    report: "легко",
+    summary: "Легко",
+  },
+  {
+    value: "normal-light",
+    label: "Норма ближе к легко",
+    report: "норма ближе к легко",
+    summary: "Норма ближе к легко",
+  },
+  {
+    value: "normal",
+    label: "Норма",
+    report: "норма",
+    summary: "Норма",
+  },
+  {
+    value: "normal-hard",
+    label: "Норма ближе к тяжело",
+    report: "норма ближе к тяжело",
+    summary: "Норма ближе к тяжело",
+  },
+  {
+    value: "hard",
+    label: "Тяжело",
+    report: "тяжело",
+    summary: "Тяжело",
+  },
+];
+
+const effortOptions = Object.fromEntries(effortLevels.map((level) => [level.value, level.label]));
 
 const fatigueOptions = {
   light: "Лёгкая",
@@ -77,7 +106,9 @@ const fatigueOptions = {
 
 const effortReportLabels = {
   easy: "легко",
-  normal: "нормально",
+  "normal-light": "норма ближе к легко",
+  normal: "норма",
+  "normal-hard": "норма ближе к тяжело",
   hard: "тяжело",
 };
 
@@ -669,8 +700,10 @@ function statsForSaved(source) {
 }
 
 function feedbackStatsForSaved(source) {
-  const counts = { easy: 0, normal: 0, hard: 0 };
+  const counts = Object.fromEntries(effortLevels.map((level) => [level.value, 0]));
   const easy = [];
+  const normalLight = [];
+  const normalHard = [];
   const hard = [];
   const feedback = source.feedback || {};
 
@@ -680,11 +713,13 @@ function feedbackStatsForSaved(source) {
       if (!value || !counts.hasOwnProperty(value)) return;
       counts[value] += 1;
       if (value === "easy") easy.push(exercise.title);
+      if (value === "normal-light") normalLight.push(exercise.title);
+      if (value === "normal-hard") normalHard.push(exercise.title);
       if (value === "hard") hard.push(exercise.title);
     });
   });
 
-  return { counts, easy, hard };
+  return { counts, easy, normalLight, normalHard, hard };
 }
 
 function fatigueStatsForSaved(source) {
@@ -758,6 +793,7 @@ function mainExerciseEntries(source, usePersistentFallback = false) {
       exercise,
       weight: weightForSource(exercise, source, usePersistentFallback),
       feedback: source.feedback?.[exercise.id] || "",
+      strength: source.strength?.[exercise.id] || {},
       done: Boolean(source.exercises?.[exercise.id]),
     })),
   );
@@ -798,7 +834,9 @@ function reportModel(weekKey) {
   const entries = mainExerciseEntries(source, week.key === currentWeek.key);
   const grouped = {
     easy: entries.filter((entry) => entry.feedback === "easy"),
+    normalLight: entries.filter((entry) => entry.feedback === "normal-light"),
     normal: entries.filter((entry) => entry.feedback === "normal"),
+    normalHard: entries.filter((entry) => entry.feedback === "normal-hard"),
     hard: entries.filter((entry) => entry.feedback === "hard"),
     unrated: entries.filter((entry) => !entry.feedback),
   };
@@ -927,19 +965,55 @@ function repeatedFeedback(kind) {
   );
 }
 
+function hasConsecutiveFeedback(exerciseId, feedback) {
+  const history = [...(resultForExercise(exerciseId).history || [])]
+    .filter((entry) => entry.feedback)
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  return history.length >= 2 && history[0].feedback === feedback && history[1].feedback === feedback;
+}
+
+function feedbackHitUpperReps(entry) {
+  const target = targetFromSets(entry.exercise?.sets);
+  const rawReps = entry.strength?.actualReps || resultForExercise(entry.exercise.id).history.at(-1)?.actualReps || "";
+  const reps = Number(String(rawReps).replace(",", "."));
+  return Number.isFinite(reps) && reps >= Number(target.maxReps || 0);
+}
+
+function isLightCoreDay(day) {
+  return day?.id === "thu";
+}
+
 function reportEntryLine(entry) {
   return `${entry.day.day} · ${entry.exercise.title} · ${entry.weight}`;
 }
 
 function recommendationFor(entry) {
+  if (isLightCoreDay(entry.day)) {
+    if (entry.feedback === "hard" || entry.feedback === "normal-hard") {
+      return `${entry.exercise.title} — ${entry.weight} → для четверга тяжеловато: лучше оставить легче, без добивания перед йогой`;
+    }
+    return `${entry.exercise.title} — ${entry.weight} → для четверга нагрузка ок, цель — лёгкая активация и контроль`;
+  }
   if (entry.feedback === "easy") {
-    return `${entry.exercise.title} — ${entry.weight} → можно рассмотреть повышение на минимальный шаг, если техника чистая и усталость дня не высокая`;
+    return `${entry.exercise.title} — ${entry.weight} → легко, можно немного увеличить вес, если техника чистая`;
+  }
+  if (entry.feedback === "normal-light") {
+    const repeated = hasConsecutiveFeedback(entry.exercise.id, "normal-light");
+    return repeated && feedbackHitUpperReps(entry)
+      ? `${entry.exercise.title} — ${entry.weight} → норма ближе к легко второй раз подряд, можно чуть повысить вес`
+      : `${entry.exercise.title} — ${entry.weight} → норма ближе к легко; если так повторится ещё раз и верх повторов выполнен, можно чуть повысить`;
   }
   if (entry.feedback === "normal") {
-    return `${entry.exercise.title} — ${entry.weight} → вес подходит, оставить без изменений`;
+    return `${entry.exercise.title} — ${entry.weight} → рабочий вес подходит, оставить и закреплять технику`;
+  }
+  if (entry.feedback === "normal-hard") {
+    const repeated = hasConsecutiveFeedback(entry.exercise.id, "normal-hard");
+    return repeated && feedbackHitUpperReps(entry)
+      ? `${entry.exercise.title} — ${entry.weight} → хорошая нагрузка для роста; можно попробовать минимальное повышение без потери техники`
+      : `${entry.exercise.title} — ${entry.weight} → хорошая нагрузка для роста, вес пока оставить и следить за техникой`;
   }
   if (entry.feedback === "hard") {
-    return `${entry.exercise.title} — ${entry.weight} → оставить или снизить на один шаг, если снова тяжело или техника ломается`;
+    return `${entry.exercise.title} — ${entry.weight} → тяжело, вес не повышать; если техника ломалась или повторы не добраны, снизить или оставить до адаптации`;
   }
   return "";
 }
@@ -951,7 +1025,7 @@ function reportList(items, emptyText, mapper = reportEntryLine) {
 
 function reportConclusions(model) {
   const lines = [];
-  const { easy, normal, hard } = model.grouped;
+  const { easy, normalLight, normal, normalHard, hard } = model.grouped;
   const strongFatigueDays = Object.entries(model.source.fatigue || {})
     .filter(([, value]) => value === "strong")
     .map(([dayId]) => workouts.find((day) => day.id === dayId)?.day)
@@ -960,11 +1034,14 @@ function reportConclusions(model) {
   if (!model.hasData) {
     return ["На этой неделе пока нет отмеченных упражнений."];
   }
-  if (normal.length >= easy.length && normal.length >= hard.length) {
+  if ((normal.length + normalHard.length) >= easy.length && (normal.length + normalHard.length) >= hard.length) {
     lines.push("Большая часть весов подобрана нормально, базовые веса можно оставить.");
   }
-  if (easy.length) {
-    lines.push("Упражнения с отметкой «Легко» можно рассмотреть для аккуратного повышения, если техника была чистой.");
+  if (normalHard.length) {
+    lines.push("Для роста мышц главный ориентир — «Норма ближе к тяжело»: последние повторы ощутимые, но техника чистая.");
+  }
+  if (easy.length || normalLight.length) {
+    lines.push("Упражнения с отметками «Легко» и «Норма ближе к легко» можно рассматривать для аккуратного повышения, если техника была чистой.");
   }
   if (hard.length) {
     lines.push("Упражнения с отметкой «Тяжело» лучше не повышать: проверить технику, повторы и восстановление.");
@@ -973,11 +1050,14 @@ function reportConclusions(model) {
     lines.push(`В дни с сильной усталостью (${strongFatigueDays.join(", ")}) веса лучше не повышать, даже если отдельные упражнения были лёгкими.`);
   }
   workouts.forEach((day) => {
-    const dayEasy = easy.filter((entry) => entry.day.id === day.id).length;
+    const dayEasy = easy.filter((entry) => entry.day.id === day.id).length + normalLight.filter((entry) => entry.day.id === day.id).length;
     const dayHard = hard.filter((entry) => entry.day.id === day.id).length;
     const dayFatigue = model.source.fatigue?.[day.id];
-    if (dayEasy >= 3 && dayFatigue === "light") {
+    if (!isLightCoreDay(day) && dayEasy >= 3 && dayFatigue === "light") {
       lines.push(`${day.day}: много лёгких упражнений и лёгкая усталость — нагрузку можно аккуратно повышать.`);
+    }
+    if (isLightCoreDay(day)) {
+      lines.push(`${day.day}: цель — «Норма» или «Норма ближе к легко», без повышения нагрузки перед вечерней йогой.`);
     }
     if (dayHard >= 3) {
       lines.push(`${day.day}: много тяжёлых упражнений — нагрузку лучше не повышать, проверить технику и восстановление.`);
@@ -1016,7 +1096,9 @@ function weeklyReportText(model) {
     "",
     "Сводка по нагрузке:",
     `— Легко: ${model.grouped.easy.length}`,
-    `— Нормально: ${model.grouped.normal.length}`,
+    `— Норма ближе к легко: ${model.grouped.normalLight.length}`,
+    `— Норма: ${model.grouped.normal.length}`,
+    `— Норма ближе к тяжело: ${model.grouped.normalHard.length}`,
     `— Тяжело: ${model.grouped.hard.length}`,
     `— Не отмечено: ${model.grouped.unrated.length}`,
     "",
@@ -1024,10 +1106,18 @@ function weeklyReportText(model) {
     ...reportConclusions(model).map((line) => `— ${line}`),
     "",
     "Кандидаты на повышение:",
-    ...(model.grouped.easy.length ? model.grouped.easy.map((entry) => `— ${recommendationFor(entry)}`) : ["— нет"]),
+    ...(
+      model.grouped.easy.length || model.grouped.normalLight.length
+        ? [...model.grouped.easy, ...model.grouped.normalLight].map((entry) => `— ${recommendationFor(entry)}`)
+        : ["— нет"]
+    ),
     "",
-    "Оставить как есть:",
-    ...(model.grouped.normal.length ? model.grouped.normal.map((entry) => `— ${recommendationFor(entry)}`) : ["— нет"]),
+    "Оставить / закрепить:",
+    ...(
+      model.grouped.normal.length || model.grouped.normalHard.length
+        ? [...model.grouped.normal, ...model.grouped.normalHard].map((entry) => `— ${recommendationFor(entry)}`)
+        : ["— нет"]
+    ),
     "",
     "Проверить / возможно снизить:",
     ...(model.grouped.hard.length ? model.grouped.hard.map((entry) => `— ${recommendationFor(entry)}`) : ["— нет"]),
@@ -1042,6 +1132,7 @@ function renderLoadSummary() {
   const feedback = feedbackStatsForSaved(saved);
   const fatigue = fatigueStatsForSaved(saved);
   const repeatedEasy = repeatedFeedback("easy");
+  const repeatedNormalLight = repeatedFeedback("normal-light");
   const repeatedHard = repeatedFeedback("hard");
 
   els.loadSummary.innerHTML = `
@@ -1055,7 +1146,9 @@ function renderLoadSummary() {
       <div class="load-summary">
         <div class="load-summary__stats">
           <span class="is-easy">Легко: <strong>${feedback.counts.easy}</strong></span>
+          <span class="is-normal-light">Норма ближе к легко: <strong>${feedback.counts["normal-light"]}</strong></span>
           <span class="is-normal">Норма: <strong>${feedback.counts.normal}</strong></span>
+          <span class="is-normal-hard">Норма ближе к тяжело: <strong>${feedback.counts["normal-hard"]}</strong></span>
           <span class="is-hard">Тяжело: <strong>${feedback.counts.hard}</strong></span>
         </div>
         <div class="load-summary__stats">
@@ -1066,17 +1159,18 @@ function renderLoadSummary() {
         <div class="load-summary__grid">
           <article>
             <h3>Возможное повышение веса</h3>
-            ${listMarkup(feedback.easy, "Пока нет упражнений с оценкой «Легко».")}
+            ${listMarkup([...feedback.easy, ...feedback.normalLight], "Пока нет упражнений с лёгкой стороной нормы.")}
           </article>
           <article>
             <h3>Проверить нагрузку</h3>
-            ${listMarkup(feedback.hard, "Пока нет упражнений с оценкой «Тяжело».")}
+            ${listMarkup([...feedback.normalHard, ...feedback.hard], "Пока нет упражнений с тяжёлой стороной нормы.")}
           </article>
           <article>
             <h3>Повторяется 2 недели</h3>
             ${listMarkup(
               [
                 ...repeatedEasy.map((item) => `${item} — легко 2 недели подряд`),
+                ...repeatedNormalLight.map((item) => `${item} — норма ближе к легко 2 недели подряд`),
                 ...repeatedHard.map((item) => `${item} — тяжело 2 недели подряд`),
               ],
               "Повторов за 2 недели пока нет.",
@@ -1136,7 +1230,9 @@ function renderWeeklyReport() {
         <h3>Нагрузка по упражнениям</h3>
         <div class="weekly-report__stats">
           <span class="is-easy">Легко: <strong>${model.grouped.easy.length}</strong></span>
-          <span class="is-normal">Нормально: <strong>${model.grouped.normal.length}</strong></span>
+          <span class="is-normal-light">Норма ближе к легко: <strong>${model.grouped.normalLight.length}</strong></span>
+          <span class="is-normal">Норма: <strong>${model.grouped.normal.length}</strong></span>
+          <span class="is-normal-hard">Норма ближе к тяжело: <strong>${model.grouped.normalHard.length}</strong></span>
           <span class="is-hard">Тяжело: <strong>${model.grouped.hard.length}</strong></span>
           <span>Не отмечено: <strong>${model.grouped.unrated.length}</strong></span>
         </div>
@@ -1146,8 +1242,16 @@ function renderWeeklyReport() {
             ${reportList(model.grouped.easy, "Пока нет лёгких упражнений.")}
           </article>
           <article>
-            <h4>Нормально</h4>
-            ${reportList(model.grouped.normal, "Пока нет упражнений с нормальной нагрузкой.")}
+            <h4>Норма ближе к легко</h4>
+            ${reportList(model.grouped.normalLight, "Пока нет упражнений ближе к легко.")}
+          </article>
+          <article>
+            <h4>Норма</h4>
+            ${reportList(model.grouped.normal, "Пока нет упражнений с нормой.")}
+          </article>
+          <article>
+            <h4>Норма ближе к тяжело</h4>
+            ${reportList(model.grouped.normalHard, "Пока нет упражнений ближе к тяжело.")}
           </article>
           <article>
             <h4>Тяжело</h4>
@@ -1166,11 +1270,11 @@ function renderWeeklyReport() {
         <div class="weekly-report__lists">
           <article>
             <h4>Кандидаты на повышение</h4>
-            ${reportList(model.grouped.easy, "Пока нет кандидатов.", recommendationFor)}
+            ${reportList([...model.grouped.easy, ...model.grouped.normalLight], "Пока нет кандидатов.", recommendationFor)}
           </article>
           <article>
-            <h4>Оставить как есть</h4>
-            ${reportList(model.grouped.normal, "Пока нет упражнений.", recommendationFor)}
+            <h4>Оставить / закрепить</h4>
+            ${reportList([...model.grouped.normal, ...model.grouped.normalHard], "Пока нет упражнений.", recommendationFor)}
           </article>
           <article>
             <h4>Проверить / возможно снизить</h4>
@@ -1288,20 +1392,40 @@ function previousResultFor(exerciseId) {
 
 function recommendationFromFeedback(feedback) {
   if (feedback === "easy") return "Можно немного увеличить вес, если техника чистая.";
-  if (feedback === "normal") return "Оставить текущий вес.";
+  if (feedback === "normal-light") return "Если так повторится ещё раз и верх повторов выполнен, можно чуть повысить вес.";
+  if (feedback === "normal") return "Рабочий вес подходит. Оставляем и закрепляем технику.";
+  if (feedback === "normal-hard") return "Хорошая нагрузка для роста. Вес пока оставить, следить за техникой.";
   if (feedback === "hard") return "Оставить или немного уменьшить вес.";
   return "После упражнения отметь нагрузку, чтобы получить рекомендацию.";
 }
 
 function strengthRecommendation(exerciseId, feedback) {
   const exercise = exerciseById(exerciseId);
+  const day = dayForExercise(exerciseId);
   const strength = exercise ? strengthForExercise(exercise) : {};
   const actualReps = Number(strength.actualReps || 0);
+  if (isLightCoreDay(day)) {
+    if (feedback === "easy" || feedback === "normal-light" || feedback === "normal") {
+      return "Для четверга это хороший уровень: лёгкая активация корпуса без добивания перед йогой.";
+    }
+    if (feedback === "normal-hard") {
+      return "Для четверга уже ближе к тяжело — вес и объём не повышать, лучше держать спокойнее.";
+    }
+    if (feedback === "hard") return "Для четверга тяжело — упростить, снизить вес или сократить объём.";
+  }
   if (feedback === "easy" && actualReps >= Number(strength.maxReps || 0)) {
     return "Легко и верх повторов выполнен — можно немного увеличить вес, если техника чистая.";
   }
   if (feedback === "easy") return "Легко — понаблюдать ещё раз или добавить повторы до верхней границы.";
-  if (feedback === "normal") return "Норма — оставить текущий вес.";
+  if (feedback === "normal-light" && actualReps >= Number(strength.maxReps || 0) && hasConsecutiveFeedback(exerciseId, "normal-light")) {
+    return "Норма ближе к легко повторяется — можно чуть повысить вес.";
+  }
+  if (feedback === "normal-light") return "Норма ближе к легко — если так повторится ещё раз и верх повторов выполнен, можно чуть повысить вес.";
+  if (feedback === "normal") return "Норма — рабочий вес подходит, оставляем.";
+  if (feedback === "normal-hard" && actualReps >= Number(strength.maxReps || 0) && hasConsecutiveFeedback(exerciseId, "normal-hard")) {
+    return "Норма ближе к тяжело и верх повторов выполнен 2 раза — можно попробовать минимальное повышение без потери техники.";
+  }
+  if (feedback === "normal-hard") return "Норма ближе к тяжело — хороший диапазон для роста, вес пока оставить.";
   if (feedback === "hard" || actualReps < Number(strength.minReps || 0)) {
     return "Тяжело или нижняя граница не выполнена — вес не повышать.";
   }
@@ -1455,6 +1579,13 @@ function setExerciseFeedback(exerciseId, value, anchor = null) {
   renderLoadSummary();
   renderWeeklyReport();
   restoreViewport(anchor, anchorTop, scrollX, scrollY, focusedElement);
+}
+
+function effortTargetText(exerciseId) {
+  const day = dayForExercise(exerciseId);
+  if (isLightCoreDay(day)) return "Цель четверга: Норма или Норма ближе к легко";
+  if (["mon", "wed", "sat"].includes(day?.id)) return "Цель силовой: Норма ближе к тяжело";
+  return "Оцени ощущение после выполнения";
 }
 
 function setDayFatigue(dayId, value, anchor = null) {
@@ -1918,6 +2049,11 @@ function renderExercise(item, order) {
     applyExerciseState(done);
   };
   applyExerciseState(Boolean(saved.exercises[item.id]));
+  const feedbackTitle = node.querySelector(".feedback-title");
+  feedbackTitle.innerHTML = `
+    <span>Как прошло?</span>
+    <small>${escapeHtml(effortTargetText(item.id))}</small>
+  `;
   node.addEventListener("click", (event) => {
     if (shouldIgnoreToggle(event)) return;
     toggleExercise();
@@ -2015,8 +2151,9 @@ function renderExercise(item, order) {
       type="button"
       data-effort="${value}"
       aria-pressed="${saved.feedback?.[item.id] === value}"
+      aria-label="Оценка нагрузки: ${escapeHtml(label)}"
     >
-      ${label}
+      ${escapeHtml(label)}
     </button>
   `).join("");
   feedbackButtons.querySelectorAll("[data-effort]").forEach((button) => {
