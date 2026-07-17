@@ -66,37 +66,49 @@ const groupLabels = {
 const effortLevels = [
   {
     value: "easy",
+    score: "1",
     label: "Легко",
     report: "легко",
     summary: "Легко",
+    hint: "Большой запас. Можно прибавить вес или повторы, если техника чистая.",
   },
   {
     value: "normal-light",
+    score: "2",
     label: "Норма ближе к легко",
     report: "норма ближе к легко",
     summary: "Норма ближе к легко",
+    hint: "Рабоче, но запас ещё большой. Если повторится, можно чуть повысить.",
   },
   {
     value: "normal",
+    score: "3",
     label: "Норма",
     report: "норма",
     summary: "Норма",
+    hint: "Вес подходит. Оставляем и закрепляем технику.",
   },
   {
     value: "normal-hard",
+    score: "4",
     label: "Норма ближе к тяжело",
     report: "норма ближе к тяжело",
     summary: "Норма ближе к тяжело",
+    hint: "Хорошая нагрузка для роста. Последние повторы ощутимые, техника чистая.",
   },
   {
     value: "hard",
+    score: "5",
     label: "Тяжело",
     report: "тяжело",
     summary: "Тяжело",
+    hint: "Вес не повышать. Если техника ломалась, лучше оставить или снизить.",
   },
 ];
 
-const effortOptions = Object.fromEntries(effortLevels.map((level) => [level.value, level.label]));
+function effortLevelFor(value) {
+  return effortLevels.find((level) => level.value === value) || null;
+}
 
 const fatigueOptions = {
   light: "Лёгкая",
@@ -1391,11 +1403,11 @@ function previousResultFor(exerciseId) {
 }
 
 function recommendationFromFeedback(feedback) {
-  if (feedback === "easy") return "Можно немного увеличить вес, если техника чистая.";
-  if (feedback === "normal-light") return "Если так повторится ещё раз и верх повторов выполнен, можно чуть повысить вес.";
-  if (feedback === "normal") return "Рабочий вес подходит. Оставляем и закрепляем технику.";
+  if (feedback === "easy") return "Легко. Можно немного увеличить вес, если техника чистая.";
+  if (feedback === "normal-light") return "Норма ближе к легко. Если так повторится ещё раз, можно немного увеличить вес.";
+  if (feedback === "normal") return "Рабочий вес подходит. Оставляем.";
   if (feedback === "normal-hard") return "Хорошая нагрузка для роста. Вес пока оставить, следить за техникой.";
-  if (feedback === "hard") return "Оставить или немного уменьшить вес.";
+  if (feedback === "hard") return "Тяжело. Вес не повышать. Если техника ломалась или повторы не добраны, лучше снизить вес.";
   return "После упражнения отметь нагрузку, чтобы получить рекомендацию.";
 }
 
@@ -1414,20 +1426,20 @@ function strengthRecommendation(exerciseId, feedback) {
     if (feedback === "hard") return "Для четверга тяжело — упростить, снизить вес или сократить объём.";
   }
   if (feedback === "easy" && actualReps >= Number(strength.maxReps || 0)) {
-    return "Легко и верх повторов выполнен — можно немного увеличить вес, если техника чистая.";
+    return "Легко. Можно немного увеличить вес, если техника чистая.";
   }
   if (feedback === "easy") return "Легко — понаблюдать ещё раз или добавить повторы до верхней границы.";
   if (feedback === "normal-light" && actualReps >= Number(strength.maxReps || 0) && hasConsecutiveFeedback(exerciseId, "normal-light")) {
     return "Норма ближе к легко повторяется — можно чуть повысить вес.";
   }
-  if (feedback === "normal-light") return "Норма ближе к легко — если так повторится ещё раз и верх повторов выполнен, можно чуть повысить вес.";
-  if (feedback === "normal") return "Норма — рабочий вес подходит, оставляем.";
+  if (feedback === "normal-light") return "Норма ближе к легко. Если так повторится ещё раз, можно немного увеличить вес.";
+  if (feedback === "normal") return "Рабочий вес подходит. Оставляем.";
   if (feedback === "normal-hard" && actualReps >= Number(strength.maxReps || 0) && hasConsecutiveFeedback(exerciseId, "normal-hard")) {
     return "Норма ближе к тяжело и верх повторов выполнен 2 раза — можно попробовать минимальное повышение без потери техники.";
   }
-  if (feedback === "normal-hard") return "Норма ближе к тяжело — хороший диапазон для роста, вес пока оставить.";
+  if (feedback === "normal-hard") return "Хорошая нагрузка для роста. Вес пока оставить, следить за техникой.";
   if (feedback === "hard" || actualReps < Number(strength.minReps || 0)) {
-    return "Тяжело или нижняя граница не выполнена — вес не повышать.";
+    return "Тяжело. Вес не повышать. Если техника ломалась или повторы не добраны, лучше снизить вес.";
   }
   return recommendationFromFeedback(feedback);
 }
@@ -1583,9 +1595,23 @@ function setExerciseFeedback(exerciseId, value, anchor = null) {
 
 function effortTargetText(exerciseId) {
   const day = dayForExercise(exerciseId);
-  if (isLightCoreDay(day)) return "Цель четверга: Норма или Норма ближе к легко";
+  if (isLightCoreDay(day)) return "Цель лёгкой тренировки: Норма или ближе к легко";
   if (["mon", "wed", "sat"].includes(day?.id)) return "Цель силовой: Норма ближе к тяжело";
   return "Оцени ощущение после выполнения";
+}
+
+function effortDetailMarkup(value) {
+  const level = effortLevelFor(value);
+  if (!level) {
+    return `
+      <strong>Выбери уровень 1-5</strong>
+      <span>Оцени упражнение после выполнения, чтобы сохранить ощущение нагрузки.</span>
+    `;
+  }
+  return `
+    <strong>${level.score} · ${escapeHtml(level.label)}</strong>
+    <span>${escapeHtml(level.hint)}</span>
+  `;
 }
 
 function setDayFatigue(dayId, value, anchor = null) {
@@ -2069,6 +2095,9 @@ function renderExercise(item, order) {
   });
 
   const feedbackButtons = node.querySelector(".feedback-buttons");
+  const feedbackDetail = document.createElement("div");
+  feedbackDetail.className = "effort-detail";
+  feedbackButtons.after(feedbackDetail);
   const resultPanel = document.createElement("div");
   resultPanel.className = "exercise-result-panel";
   node.querySelector(".exercise-card__actions").insertBefore(resultPanel, node.querySelector(".effort-feedback"));
@@ -2145,26 +2174,33 @@ function renderExercise(item, order) {
   };
   renderResultPanel();
 
-  feedbackButtons.innerHTML = Object.entries(effortOptions).map(([value, label]) => `
+  const renderFeedbackSelection = (value) => {
+    feedbackButtons.querySelectorAll("[data-effort]").forEach((option) => {
+      const selected = option.dataset.effort === value;
+      option.classList.toggle("is-selected", selected);
+      option.setAttribute("aria-pressed", String(selected));
+    });
+    feedbackDetail.innerHTML = effortDetailMarkup(value);
+  };
+
+  feedbackButtons.innerHTML = effortLevels.map((level) => `
     <button
-      class="effort-button is-${value} ${saved.feedback?.[item.id] === value ? "is-selected" : ""}"
+      class="effort-button is-${level.value}"
       type="button"
-      data-effort="${value}"
-      aria-pressed="${saved.feedback?.[item.id] === value}"
-      aria-label="Оценка нагрузки: ${escapeHtml(label)}"
+      data-effort="${level.value}"
+      aria-pressed="false"
+      aria-label="Оценка нагрузки ${level.score}: ${escapeHtml(level.label)}"
+      title="${escapeHtml(level.label)}"
     >
-      ${escapeHtml(label)}
+      ${level.score}
     </button>
   `).join("");
+  renderFeedbackSelection(saved.feedback?.[item.id] || "");
   feedbackButtons.querySelectorAll("[data-effort]").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       setExerciseFeedback(item.id, button.dataset.effort, node);
-      feedbackButtons.querySelectorAll("[data-effort]").forEach((option) => {
-        const selected = option.dataset.effort === button.dataset.effort;
-        option.classList.toggle("is-selected", selected);
-        option.setAttribute("aria-pressed", String(selected));
-      });
+      renderFeedbackSelection(button.dataset.effort);
       renderResultPanel();
     });
   });
