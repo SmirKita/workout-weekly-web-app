@@ -1807,8 +1807,10 @@ p {
   display: inline-grid;
   place-items: center;
   min-height: 42px;
+  border-color: #d8e0da;
   border-radius: 999px;
-  color: #31423c;
+  background: #fff;
+  color: #51615a;
   font-size: 15px;
   line-height: 1;
   padding: 0;
@@ -1816,8 +1818,8 @@ p {
 }
 
 .effort-button:hover {
-  background: #f1f5ef;
-  border-color: #cbd8ce;
+  background: #f5f7f3;
+  border-color: #c7d2ca;
 }
 
 .fatigue-button {
@@ -1827,39 +1829,39 @@ p {
 .effort-button.is-easy.is-selected,
 .fatigue-button.is-light.is-selected {
   border-color: transparent;
-  background: #5e8067;
+  background: #2e9b5f;
   color: #fff;
-  box-shadow: 0 8px 18px rgb(55 84 64 / 18%);
+  box-shadow: 0 8px 18px rgb(46 155 95 / 18%);
 }
 
 .effort-button.is-normal-light.is-selected {
   border-color: transparent;
-  background: #668b6f;
+  background: #7bbf45;
   color: #fff;
-  box-shadow: 0 8px 18px rgb(55 84 64 / 18%);
+  box-shadow: 0 8px 18px rgb(123 191 69 / 18%);
 }
 
 .effort-button.is-normal.is-selected,
 .fatigue-button.is-normal.is-selected {
   border-color: transparent;
-  background: #506a74;
+  background: #d4a72c;
   color: #fff;
-  box-shadow: 0 8px 18px rgb(50 70 76 / 18%);
+  box-shadow: 0 8px 18px rgb(212 167 44 / 18%);
 }
 
 .effort-button.is-normal-hard.is-selected {
   border-color: transparent;
-  background: #2f5947;
+  background: #d97a2b;
   color: #fff;
-  box-shadow: 0 8px 18px rgb(35 76 57 / 22%);
+  box-shadow: 0 8px 18px rgb(217 122 43 / 20%);
 }
 
 .effort-button.is-hard.is-selected,
 .fatigue-button.is-strong.is-selected {
   border-color: transparent;
-  background: #4f463b;
+  background: #c94a4a;
   color: #fff;
-  box-shadow: 0 8px 18px rgb(65 55 45 / 20%);
+  box-shadow: 0 8px 18px rgb(201 74 74 / 20%);
 }
 
 .fatigue-button.is-light.is-selected {
@@ -1892,6 +1894,26 @@ p {
 .effort-detail strong {
   color: var(--ink);
   font-size: 14px;
+}
+
+.effort-detail.is-easy strong {
+  color: #2e8b57;
+}
+
+.effort-detail.is-normal-light strong {
+  color: #669f3c;
+}
+
+.effort-detail.is-normal strong {
+  color: #a77d1f;
+}
+
+.effort-detail.is-normal-hard strong {
+  color: #b96322;
+}
+
+.effort-detail.is-hard strong {
+  color: #b23f3f;
 }
 
 .summary,

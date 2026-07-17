@@ -2180,6 +2180,7 @@ function renderExercise(item, order) {
       option.classList.toggle("is-selected", selected);
       option.setAttribute("aria-pressed", String(selected));
     });
+    feedbackDetail.className = `effort-detail${value ? ` is-${value}` : ""}`;
     feedbackDetail.innerHTML = effortDetailMarkup(value);
   };
 
