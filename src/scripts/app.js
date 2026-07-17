@@ -18,6 +18,15 @@ const cardioResultsStorageKey = "workout-cardio-results:v1";
 const bodyMetricsStorageKey = "workout-body-metrics:v1";
 const authLinkCooldownStorageKey = "workout-sync-auth-link-cooldown-until:v1";
 const syncMetaStorageKey = "workout-sync-meta:v1";
+const fridayPoolCompletionKey = "fri-pool-section:0";
+const legacyFridayPoolCompletionKeys = [
+  "fri-warmup-section:0",
+  "fri-warmup-section:1",
+  "fri-technique-section:0",
+  "fri-main-section:0",
+  "fri-extra-section:0",
+  "fri-cooldown-section:0",
+];
 const backupFileName = "backup-workout-weekly.json";
 const authLinkCooldownMs = 60 * 1000;
 const saved = loadSaved();
@@ -112,7 +121,7 @@ function effortLevelFor(value) {
 
 const fatigueOptions = {
   light: "Лёгкая",
-  normal: "Нормальная",
+  normal: "Норм",
   strong: "Сильная",
 };
 
@@ -291,6 +300,30 @@ function loadSaved() {
     ...emptyProgress(),
     notes: {},
   };
+}
+
+function migrateFridayPoolCompletion() {
+  const updatedAt = new Date().toISOString();
+
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (!/^workout-progress-\d{4}-W\d{2}$/.test(key || "")) continue;
+
+    const progress = key === progressStorageKey ? saved : loadJson(key, emptyProgress());
+    progress.days = progress.days || {};
+    progress.exercises = progress.exercises || {};
+    if (progress.exercises[fridayPoolCompletionKey] !== undefined) continue;
+
+    const legacyItemsComplete = legacyFridayPoolCompletionKeys.every(
+      (itemKey) => progress.exercises[itemKey] === true,
+    );
+    if (!progress.days.fri && !legacyItemsComplete) continue;
+
+    progress.exercises[fridayPoolCompletionKey] = true;
+    progress.days.fri = true;
+    progress.updatedAt = updatedAt;
+    localStorage.setItem(key, JSON.stringify(progress));
+  }
 }
 
 function loadExerciseResults() {
@@ -1712,7 +1745,13 @@ function matchesQuery(day) {
       section.title,
       section.summary,
       section.tags.join(" "),
-      ...section.items.flatMap((item) => [item.title, item.amount, item.technique, item.goal]),
+      ...section.items.flatMap((item) => [
+        item.title,
+        item.amount,
+        item.technique,
+        item.goal,
+        ...(item.program || []).flatMap((step) => [step.title, step.amount, step.note, ...(step.lines || [])]),
+      ]),
     ]),
     ...day.exercises.flatMap((exercise) => [
       exercise.title,
@@ -1931,7 +1970,13 @@ function sectionMatches(section, day) {
     section.title,
     section.summary,
     section.tags.join(" "),
-    ...section.items.flatMap((item) => [item.title, item.amount, item.technique, item.goal]),
+    ...section.items.flatMap((item) => [
+      item.title,
+      item.amount,
+      item.technique,
+      item.goal,
+      ...(item.program || []).flatMap((step) => [step.title, step.amount, step.note, ...(step.lines || [])]),
+    ]),
   ].join(" "));
   return filterOk && haystack.includes(normalize(state.query));
 }
@@ -1969,6 +2014,8 @@ function renderMainSection(day, exercises) {
 }
 
 function renderRoutineSection(section) {
+  if (section.kind === "pool-session") return renderPoolSession(section);
+
   const node = document.createElement("section");
   node.className = `routine-section routine-${section.kind}`;
   node.innerHTML = `
@@ -2052,6 +2099,57 @@ function renderRoutineSection(section) {
       });
     });
     list.append(row);
+  });
+
+  return node;
+}
+
+function renderPoolSession(section) {
+  const item = section.items[0];
+  const key = `${section.id}:0`;
+  const node = document.createElement("section");
+  const isDone = Boolean(saved.exercises[key]);
+  node.className = "routine-section routine-pool-session";
+  node.innerHTML = `
+    <article class="pool-session ${isDone ? "is-done" : ""}">
+      <header class="pool-session__header">
+        <div>
+          <p class="eyebrow">Пятничная тренировка</p>
+          <h2>${escapeHtml(item.title)}</h2>
+          <p>${escapeHtml(item.amount)}</p>
+        </div>
+        <span class="pool-session__status">${isDone ? "1/1" : "0/1"}</span>
+      </header>
+      <p class="pool-session__note">В бассейне не отмечаем каждый кусок отдельно. Программа идёт одним блоком, после выхода нажимаем «Готово».</p>
+      <ol class="pool-program">
+        ${(item.program || []).map((step) => `
+          <li>
+            <div class="pool-program__step">
+              <strong>${escapeHtml(step.title)}</strong>
+              ${step.amount ? `<span>${escapeHtml(step.amount)}</span>` : ""}
+            </div>
+            ${(step.lines || []).length ? `<ul>${step.lines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>` : ""}
+            ${step.note ? `<p>${escapeHtml(step.note)}</p>` : ""}
+          </li>
+        `).join("")}
+      </ol>
+      <button class="pool-session__done" type="button" aria-pressed="${isDone}">
+        <span aria-hidden="true">${isDone ? "✓" : ""}</span>
+        <strong>${isDone ? "Выполнено" : "Готово"}</strong>
+      </button>
+    </article>
+  `;
+
+  const card = node.querySelector(".pool-session");
+  const button = node.querySelector(".pool-session__done");
+  button.addEventListener("click", () => {
+    const done = !saved.exercises[key];
+    setCompletion(key, done, card);
+    card.classList.toggle("is-done", done);
+    button.setAttribute("aria-pressed", String(done));
+    button.querySelector("span").textContent = done ? "✓" : "";
+    button.querySelector("strong").textContent = done ? "Выполнено" : "Готово";
+    node.querySelector(".pool-session__status").textContent = done ? "1/1" : "0/1";
   });
 
   return node;
@@ -2650,6 +2748,7 @@ els.quickMode.addEventListener("change", (event) => {
 els.todayButton.addEventListener("click", () => selectDay(todayWorkoutId()));
 
 renderLists();
+migrateFridayPoolCompletion();
 syncAllDayCompletion();
 persist({ sync: false, touch: false });
 if (!localStorage.getItem(bodyMetricsStorageKey)) {
