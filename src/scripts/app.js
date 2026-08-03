@@ -1,5 +1,16 @@
-import { filters, progression, safety, workouts } from "../data/workouts.js";
+import { archivedExercises, filters, progression, safety, workouts } from "../data/workouts.js";
 import { createWorkoutCloudSync } from "./cloud-sync.js";
+import {
+  duplicateBodyPairs,
+  formatNumber,
+  formatWeightData,
+  fourWeekChange,
+  normalizeCardioEntry,
+  normalizeWeightData,
+  parseLocaleNumber,
+  performanceTextFrom,
+  setResultsFrom,
+} from "./data-model.js";
 
 const state = {
   activeDayId: workouts[0].id,
@@ -16,6 +27,7 @@ const notesStorageKey = `workout-notes-${currentWeek.key}`;
 const exerciseResultsStorageKey = "workout-exercise-results:v2";
 const cardioResultsStorageKey = "workout-cardio-results:v1";
 const bodyMetricsStorageKey = "workout-body-metrics:v1";
+const dataReviewStorageKey = "workout-data-review:v1";
 const authLinkCooldownStorageKey = "workout-sync-auth-link-cooldown-until:v1";
 const syncMetaStorageKey = "workout-sync-meta:v1";
 const fridayPoolCompletionKey = "fri-pool-section:0";
@@ -33,6 +45,7 @@ const saved = loadSaved();
 let exerciseResults;
 const cardioResults = loadCardioResults();
 let bodyMetrics;
+let dataReviewState = loadJson(dataReviewStorageKey, { dismissed: {}, updatedAt: "" });
 let cloudSync = null;
 let authLinkSubmitting = false;
 let authOtpSubmitting = false;
@@ -54,6 +67,7 @@ const els = {
   loadSummary: document.querySelector("#loadSummary"),
   weeklyReport: document.querySelector("#weeklyReport"),
   bodyTracker: document.querySelector("#bodyTracker"),
+  dataReview: document.querySelector("#dataReview"),
   safetyList: document.querySelector("#safetyList"),
   progressionList: document.querySelector("#progressionList"),
   cloudSync: document.querySelector("#cloudSync"),
@@ -188,6 +202,10 @@ const bodyMetricDefaults = {
   proteinPercent: 21.1,
   bmrKcal: 1597,
   biologicalAge: 42,
+  waistCm: "",
+  weeklyAverageWeightKg: "",
+  sleepHours: "",
+  recovery: "normal",
 };
 
 const bodyMetricFields = [
@@ -204,7 +222,48 @@ const bodyMetricFields = [
   ["proteinPercent", "Белок", "%"],
   ["bmrKcal", "BMR", "ккал"],
   ["biologicalAge", "Биологический возраст", ""],
+  ["waistCm", "Талия", "см"],
+  ["weeklyAverageWeightKg", "Средний вес за неделю", "кг"],
+  ["sleepHours", "Сон", "ч"],
 ];
+
+const bodyComparisonFields = bodyMetricFields
+  .map(([key]) => key)
+  .filter((key) => !["weeklyAverageWeightKg", "sleepHours"].includes(key));
+
+const recoveryOptions = {
+  good: "Хорошее",
+  normal: "Нормальное",
+  weak: "Слабое",
+};
+
+const techniqueOptions = {
+  good: "Техника хорошая",
+  unstable: "Техника нестабильная",
+  discomfort: "Дискомфорт",
+  pain: "Боль",
+};
+
+const rirOptions = {
+  "3plus": "3+",
+  "2": "2",
+  "1": "1",
+  "0": "0",
+};
+
+const exerciseProgressionGuidance = {
+  "leg-extension": "Можно пробовать следующую ступень на первом подходе; ориентир после повышения — 12 повторений.",
+  "pallof-press": "Можно попробовать небольшую ступень вверх или оставить вес и добавить паузу 1-2 секунды.",
+  "shoulder-press": "Можно попробовать 9 кг / рука; если 9 кг нет — один пробный подход 10 кг на 8 повторений.",
+  "hammer-curl": "Можно попробовать 8 кг / рука, начав с 10 повторений.",
+  "close-grip-push-up": "Прогрессировать медленным опусканием за 3 секунды или немного повысить положение ног.",
+  "leg-press": "Повышать только если после 12-го повторения остаётся минимум RIR 2.",
+  "romanian-deadlift": "Сначала довести до 11-12 чистых повторений, затем обсуждать повышение.",
+  "lat-pulldown": "Пока сохранить 40 кг и сосредоточиться на технике.",
+  "reverse-fly": "Пока сохранить 12 кг и сосредоточиться на технике.",
+  "lateral-raise": "Пока сохранить 5 кг / рука и сосредоточиться на технике.",
+  "hip-thrust": "Пока сохранить 10 кг и сосредоточиться на технике.",
+};
 
 bodyMetrics = loadBodyMetrics();
 migrateWeeklyResults();
@@ -255,11 +314,13 @@ function getWeekInfoFromKey(key) {
 
 function emptyProgress() {
   return {
+    version: 3,
     days: {},
     exercises: {},
     feedback: {},
     fatigue: {},
     workingWeights: {},
+    weightData: {},
     strength: {},
     cardio: {},
   };
@@ -278,8 +339,7 @@ function savedForWeek(weekKey) {
   const progress = loadJson(`workout-progress-${weekKey}`, emptyProgress());
   const notes = loadJson(`workout-notes-${weekKey}`, {});
   return {
-    ...emptyProgress(),
-    ...progress,
+    ...normalizeProgressV3(progress),
     notes,
   };
 }
@@ -290,8 +350,7 @@ function loadSaved() {
 
   if (progress || notes) {
     return {
-      ...emptyProgress(),
-      ...(progress || {}),
+      ...normalizeProgressV3(progress || emptyProgress()),
       notes: notes || {},
     };
   }
@@ -332,11 +391,36 @@ function loadExerciseResults() {
     version: 2,
     exercises: {},
   };
-  const migrated = applyBackupWorkout2Results(results);
-  if (migrated.changed) {
+  const seeded = applyBackupWorkout2Results(results);
+  const migrated = migrateExerciseResultsV3(seeded.results);
+  if (seeded.changed || migrated.changed) {
     localStorage.setItem(exerciseResultsStorageKey, JSON.stringify(migrated.results));
   }
   return migrated.results;
+}
+
+function migrateExerciseResultsV3(results) {
+  if (results.migrations?.["structured-results-v3"]) return { changed: false, results };
+  const migrated = {
+    ...results,
+    version: 3,
+    exercises: { ...(results.exercises || {}) },
+    migrations: { ...(results.migrations || {}), "structured-results-v3": true },
+  };
+  Object.entries(migrated.exercises).forEach(([exerciseId, exerciseResult]) => {
+    const workingWeight = exerciseResult.workingWeight || "";
+    const workingWeightData = exerciseResult.workingWeightData || normalizeWeightData(workingWeight);
+    migrated.exercises[exerciseId] = {
+      ...exerciseResult,
+      archived: archivedExercises.some((item) => item.id === exerciseId) || Boolean(exerciseResult.archived),
+      workingWeightData,
+      history: (exerciseResult.history || []).map((entry) => ({
+        ...entry,
+        weightData: entry.weightData || normalizeWeightData(entry.weight || workingWeight),
+      })),
+    };
+  });
+  return { changed: true, results: migrated };
 }
 
 function applyBackupWorkout2Results(results) {
@@ -378,18 +462,58 @@ function loadCardioResults() {
 
 function loadBodyMetrics() {
   const stored = loadJson(bodyMetricsStorageKey, null);
-  if (stored?.entries?.length) return stored;
+  if (stored?.entries?.length) {
+    if (stored.version >= 2) return stored;
+    const migrated = {
+      ...stored,
+      version: 2,
+      duplicateDecisions: stored.duplicateDecisions || {},
+      entries: stored.entries.map((entry) => ({
+        ...entry,
+        comments: entry.comments ?? entry.notes ?? "",
+        recovery: entry.recovery || "normal",
+      })),
+    };
+    localStorage.setItem(bodyMetricsStorageKey, JSON.stringify(migrated));
+    return migrated;
+  }
   return {
-    version: 1,
+    version: 2,
+    duplicateDecisions: {},
     entries: [
       {
         date: new Date().toISOString().slice(0, 10),
         ...bodyMetricDefaults,
+        comments: "Стартовые значения",
         notes: "Стартовые значения",
       },
     ],
     updatedAt: new Date().toISOString(),
   };
+}
+
+function normalizeProgressV3(progress) {
+  const next = { ...emptyProgress(), ...progress, version: 3 };
+  next.weightData = { ...(progress.weightData || {}) };
+  Object.entries(progress.workingWeights || {}).forEach(([exerciseId, weight]) => {
+    if (!next.weightData[exerciseId]) next.weightData[exerciseId] = normalizeWeightData(weight);
+  });
+  next.cardio = Object.fromEntries(
+    Object.entries(progress.cardio || {}).map(([key, entry]) => [key, normalizeCardioEntry(entry)]),
+  );
+  return next;
+}
+
+function migrateWeeklyDataV3() {
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (!/^workout-progress-\d{4}-W\d{2}$/.test(key || "")) continue;
+    const stored = loadJson(key, emptyProgress());
+    if (stored.version >= 3) continue;
+    const migrated = normalizeProgressV3(stored);
+    if (key === progressStorageKey) replaceObject(saved, migrated);
+    localStorage.setItem(key, JSON.stringify(migrated));
+  }
 }
 
 function persistExerciseResults({ sync = true, touch = true } = {}) {
@@ -484,11 +608,13 @@ function persist({ sync = true, touch = true } = {}) {
   const updatedAt = touch ? new Date().toISOString() : (saved.updatedAt || new Date().toISOString());
   saved.updatedAt = updatedAt;
   const progressPayload = {
+    version: 3,
     days: saved.days,
     exercises: saved.exercises,
     feedback: saved.feedback || {},
     fatigue: saved.fatigue || {},
     workingWeights: saved.workingWeights || {},
+    weightData: saved.weightData || {},
     strength: saved.strength || {},
     cardio: saved.cardio || {},
     updatedAt,
@@ -573,7 +699,7 @@ function workoutBackupRecords() {
 function createWorkoutBackup() {
   return {
     app: "workout-weekly-web-app",
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     records: workoutBackupRecords(),
   };
@@ -632,7 +758,8 @@ function applyRemoteData(keys) {
   const affectsResults = keys.includes(exerciseResultsStorageKey);
   const affectsCardio = keys.includes(cardioResultsStorageKey);
   const affectsBody = keys.includes(bodyMetricsStorageKey);
-  if (!affectsCurrentProgress && !affectsCurrentNotes && !affectsResults && !affectsCardio && !affectsBody) {
+  const affectsReview = keys.includes(dataReviewStorageKey);
+  if (!affectsCurrentProgress && !affectsCurrentNotes && !affectsResults && !affectsCardio && !affectsBody && !affectsReview) {
     renderHistory();
     renderWeeklyReport();
     return;
@@ -645,6 +772,7 @@ function applyRemoteData(keys) {
   if (affectsResults) replaceObject(exerciseResults, loadExerciseResults());
   if (affectsCardio) replaceObject(cardioResults, loadCardioResults());
   if (affectsBody) replaceObject(bodyMetrics, loadBodyMetrics());
+  if (affectsReview) replaceObject(dataReviewState, loadJson(dataReviewStorageKey, { dismissed: {}, updatedAt: "" }));
   syncAllDayCompletion();
   render();
   requestAnimationFrame(() => {
@@ -782,7 +910,8 @@ function weightText(weight) {
 
 function targetFromSets(value) {
   const text = String(value || "");
-  const match = /(\d+)\s*[x×х]\s*([\d,.]+(?:\s*[-–]\s*[\d,.]+)?|[^\s]+)/i.exec(text);
+  const timeUnit = /сек/i.test(text) ? "сек" : /мин/i.test(text) ? "мин" : "";
+  const match = /(\d+)(?:\s*[-–]\s*(\d+))?\s*[x×х]\s*([\d,.]+(?:\s*[-–]\s*[\d,.]+)?|[^\s]+)/i.exec(text);
   if (!match) {
     const timeMatch = /(\d+)\s*(сек|мин)/i.exec(text);
     return {
@@ -793,25 +922,29 @@ function targetFromSets(value) {
       unit: timeMatch?.[2] || "повт.",
     };
   }
-  const repsText = match[2].replace(",", ".").replace(/\s+/g, "");
+  const repsText = match[3].replace(",", ".").replace(/\s+/g, "");
   const numbers = repsText.match(/\d+(?:\.\d+)?/g)?.map(Number) || [];
   return {
-    targetSets: Number(match[1]) || 3,
-    targetReps: repsText,
+    targetSets: Number(match[2] || match[1]) || 3,
+    targetReps: `${repsText}${timeUnit ? ` ${timeUnit}` : ""}`,
     minReps: numbers[0] || 12,
     maxReps: numbers.at(-1) || numbers[0] || 12,
-    unit: /сек|мин/i.test(repsText) ? "" : "повт.",
+    unit: timeUnit || "повт.",
   };
 }
 
 function strengthForExercise(exercise) {
   const target = targetFromSets(exercise?.sets);
   const stored = saved.strength?.[exercise.id] || {};
+  const setResults = setResultsFrom(stored.setResults);
   return {
     targetSets: stored.targetSets || target.targetSets,
     targetReps: stored.targetReps || target.targetReps,
-    actualSets: stored.actualSets || target.targetSets,
-    actualReps: stored.actualReps || target.maxReps,
+    actualSets: stored.actualSets || "",
+    actualReps: stored.actualReps || "",
+    setResults,
+    rir: stored.rir || "",
+    techniqueStatus: stored.techniqueStatus || "",
     minReps: target.minReps,
     maxReps: target.maxReps,
     unit: target.unit,
@@ -819,10 +952,7 @@ function strengthForExercise(exercise) {
 }
 
 function performanceText(entry) {
-  if (!entry) return "";
-  const sets = entry.actualSets || "";
-  const reps = entry.actualReps || "";
-  return sets && reps ? `${sets} x ${reps}` : "";
+  return performanceTextFrom(entry);
 }
 
 function weightForSource(exercise, source, usePersistentFallback = false) {
@@ -1019,9 +1149,26 @@ function hasConsecutiveFeedback(exerciseId, feedback) {
 
 function feedbackHitUpperReps(entry) {
   const target = targetFromSets(entry.exercise?.sets);
-  const rawReps = entry.strength?.actualReps || resultForExercise(entry.exercise.id).history.at(-1)?.actualReps || "";
-  const reps = Number(String(rawReps).replace(",", "."));
-  return Number.isFinite(reps) && reps >= Number(target.maxReps || 0);
+  const strength = entry.strength || {};
+  const setResults = setResultsFrom(strength.setResults || resultForExercise(entry.exercise.id).history.at(-1)?.setResults);
+  if (setResults.length) return setResults.length >= target.targetSets && setResults.every((item) => Number(item.reps) >= Number(target.maxReps || 0));
+  const reps = parseLocaleNumber(strength.actualReps || resultForExercise(entry.exercise.id).history.at(-1)?.actualReps);
+  return reps !== null && reps >= Number(target.maxReps || 0);
+}
+
+function resultHitUpperReps(result, exercise) {
+  const target = targetFromSets(exercise?.sets);
+  const setResults = setResultsFrom(result?.setResults || (Array.isArray(result?.actualSets) ? result.actualSets : []));
+  if (setResults.length) {
+    return setResults.length >= target.targetSets
+      && setResults.every((item) => Number(item.reps) >= Number(target.maxReps || 0));
+  }
+  const actualSets = parseLocaleNumber(result?.actualSets);
+  const actualReps = parseLocaleNumber(result?.actualReps);
+  return actualSets !== null
+    && actualSets >= target.targetSets
+    && actualReps !== null
+    && actualReps >= target.maxReps;
 }
 
 function isLightCoreDay(day) {
@@ -1033,11 +1180,25 @@ function reportEntryLine(entry) {
 }
 
 function recommendationFor(entry) {
+  const techniqueStatus = entry.strength?.techniqueStatus || "";
+  const rir = entry.strength?.rir || "";
+  if (techniqueStatus === "pain") {
+    return `${entry.exercise.title} — ${entry.weight} → отмечена боль: вес не повышать и разобраться с причиной`;
+  }
+  if (techniqueStatus === "unstable" || techniqueStatus === "discomfort") {
+    return `${entry.exercise.title} — ${entry.weight} → сначала вернуть стабильную технику и движение без дискомфорта`;
+  }
   if (isLightCoreDay(entry.day)) {
     if (entry.feedback === "hard" || entry.feedback === "normal-hard") {
       return `${entry.exercise.title} — ${entry.weight} → для четверга тяжеловато: лучше оставить легче, без добивания перед йогой`;
     }
     return `${entry.exercise.title} — ${entry.weight} → для четверга нагрузка ок, цель — лёгкая активация и контроль`;
+  }
+  if (rir === "0") {
+    return `${entry.exercise.title} — ${entry.weight} → RIR 0: вес не повышать; проверить повторы и технику`;
+  }
+  if (rir === "1") {
+    return `${entry.exercise.title} — ${entry.weight} → RIR 1: оставить нагрузку и закрепить технику`;
   }
   if (entry.feedback === "easy") {
     return `${entry.exercise.title} — ${entry.weight} → легко, можно немного увеличить вес, если техника чистая`;
@@ -1079,7 +1240,11 @@ function reportConclusions(model) {
   if (!model.hasData) {
     return ["На этой неделе пока нет отмеченных упражнений."];
   }
-  if ((normal.length + normalHard.length) >= easy.length && (normal.length + normalHard.length) >= hard.length) {
+  const ratedCount = easy.length + normalLight.length + normal.length + normalHard.length + hard.length;
+  if (!ratedCount) {
+    lines.push("Результаты уже внесены, но оценка нагрузки по упражнениям пока не отмечена.");
+  }
+  if ((normal.length + normalHard.length) > 0 && (normal.length + normalHard.length) >= easy.length && (normal.length + normalHard.length) >= hard.length) {
     lines.push("Большая часть весов подобрана нормально, базовые веса можно оставить.");
   }
   if (normalHard.length) {
@@ -1133,7 +1298,8 @@ function weeklyReportText(model) {
       const entry = model.entries.find((item) => item.exercise.id === exercise.id);
       const strength = model.source.strength?.[exercise.id] || {};
       const performance = performanceText(strength);
-      lines.push(`— ${exercise.title} — ${entry?.weight || weightText(exercise.weight)}${performance ? ` — ${performance}` : ""} — ${effortReportLabels[model.source.feedback?.[exercise.id]] || "не отмечено"}`);
+      const technique = techniqueOptions[strength.techniqueStatus] || "";
+      lines.push(`— ${exercise.title} — ${entry?.weight || weightText(exercise.weight)}${performance ? ` — ${performance}` : ""}${strength.rir ? ` — RIR ${rirOptions[strength.rir] || strength.rir}` : ""}${technique ? ` — ${technique.toLowerCase()}` : ""} — ${effortReportLabels[model.source.feedback?.[exercise.id]] || "не отмечено"}`);
     });
   });
 
@@ -1417,9 +1583,17 @@ function setDayCompletion(day, done) {
 }
 
 function workingWeightFor(exerciseId) {
-  return saved.workingWeights?.[exerciseId]
-    || resultForExercise(exerciseId).workingWeight
+  return formatWeightData(weightDataForExercise(exerciseId));
+}
+
+function weightDataForExercise(exerciseId) {
+  const persistent = resultForExercise(exerciseId);
+  const fallback = saved.workingWeights?.[exerciseId]
+    || persistent.workingWeight
     || weightText(exerciseById(exerciseId)?.weight);
+  return saved.weightData?.[exerciseId]
+    || persistent.workingWeightData
+    || normalizeWeightData(fallback);
 }
 
 function previousResultFor(exerciseId) {
@@ -1448,7 +1622,23 @@ function strengthRecommendation(exerciseId, feedback) {
   const exercise = exerciseById(exerciseId);
   const day = dayForExercise(exerciseId);
   const strength = exercise ? strengthForExercise(exercise) : {};
-  const actualReps = Number(strength.actualReps || 0);
+  const reps = strength.setResults.map((item) => Number(item.reps)).filter(Number.isFinite);
+  const hitUpper = reps.length >= strength.targetSets && reps.every((value) => value >= strength.maxReps);
+  const missedMinimum = reps.length > 0 && reps.some((value) => value < strength.minReps);
+  const currentHistory = [...(resultForExercise(exerciseId).history || [])]
+    .filter((entry) => entry.rir)
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  const eligibleRir = ["2", "3", "3plus"].includes(strength.rir);
+  const eligibleTwice = eligibleRir
+    && currentHistory.length >= 2
+    && currentHistory.slice(0, 2).every((entry) => (
+      ["2", "3", "3plus"].includes(entry.rir)
+      && resultHitUpperReps(entry, exercise)
+    ));
+  if (strength.techniqueStatus === "pain") return "Отмечена боль. Нагрузку не повышать; остановить упражнение и разобраться с причиной.";
+  if (strength.techniqueStatus === "unstable" || strength.techniqueStatus === "discomfort") {
+    return "Нагрузку не повышать: сначала вернуть стабильную технику и движение без дискомфорта.";
+  }
   if (isLightCoreDay(day)) {
     if (feedback === "easy" || feedback === "normal-light" || feedback === "normal") {
       return "Для четверга это хороший уровень: лёгкая активация корпуса без добивания перед йогой.";
@@ -1458,22 +1648,11 @@ function strengthRecommendation(exerciseId, feedback) {
     }
     if (feedback === "hard") return "Для четверга тяжело — упростить, снизить вес или сократить объём.";
   }
-  if (feedback === "easy" && actualReps >= Number(strength.maxReps || 0)) {
-    return "Легко. Можно немного увеличить вес, если техника чистая.";
-  }
-  if (feedback === "easy") return "Легко — понаблюдать ещё раз или добавить повторы до верхней границы.";
-  if (feedback === "normal-light" && actualReps >= Number(strength.maxReps || 0) && hasConsecutiveFeedback(exerciseId, "normal-light")) {
-    return "Норма ближе к легко повторяется — можно чуть повысить вес.";
-  }
-  if (feedback === "normal-light") return "Норма ближе к легко. Если так повторится ещё раз, можно немного увеличить вес.";
-  if (feedback === "normal") return "Рабочий вес подходит. Оставляем.";
-  if (feedback === "normal-hard" && actualReps >= Number(strength.maxReps || 0) && hasConsecutiveFeedback(exerciseId, "normal-hard")) {
-    return "Норма ближе к тяжело и верх повторов выполнен 2 раза — можно попробовать минимальное повышение без потери техники.";
-  }
-  if (feedback === "normal-hard") return "Хорошая нагрузка для роста. Вес пока оставить, следить за техникой.";
-  if (feedback === "hard" || actualReps < Number(strength.minReps || 0)) {
-    return "Тяжело. Вес не повышать. Если техника ломалась или повторы не добраны, лучше снизить вес.";
-  }
+  if (strength.rir === "0" || missedMinimum) return "Снизить нагрузку или проверить технику. Вес не повышать.";
+  if (strength.rir === "1" || feedback === "normal-hard") return "Оставить текущую нагрузку и закрепить верхнюю границу повторений.";
+  if (hitUpper && eligibleTwice) return "Можно попробовать следующую ступень веса. Первый подход выполнить как пробный. Если техника ухудшается или не получается нижняя граница повторений, вернуть предыдущий вес.";
+  if (hitUpper && eligibleRir) return "Верх повторов выполнен с запасом. Повторить результат ещё на одной тренировке перед повышением веса.";
+  if (eligibleRir) return "Запас достаточный, но верхняя граница повторений пока нестабильна. Оставить текущий вес.";
   return recommendationFromFeedback(feedback);
 }
 
@@ -1484,6 +1663,7 @@ function saveExerciseResult(exerciseId, feedback) {
   const day = dayForExercise(exerciseId);
   const strength = exercise ? strengthForExercise(exercise) : {};
   const existing = result.history.find((entry) => entry.weekKey === currentWeek.key);
+  const resolvedFeedback = feedback || existing?.feedback || "";
   const entry = {
     date: new Date().toISOString(),
     weekKey: currentWeek.key,
@@ -1493,24 +1673,43 @@ function saveExerciseResult(exerciseId, feedback) {
     targetReps: strength.targetReps,
     actualSets: strength.actualSets,
     actualReps: strength.actualReps,
-    feedback,
+    setResults: strength.setResults,
+    rir: strength.rir,
+    techniqueStatus: strength.techniqueStatus,
+    feedback: resolvedFeedback,
+    weightData: weightDataForExercise(exerciseId),
   };
   if (existing) Object.assign(existing, entry);
   else result.history.push(entry);
   result.workingWeight = weight;
-  result.latestFeedback = feedback;
+  if (resolvedFeedback) result.latestFeedback = resolvedFeedback;
   result.history.sort((a, b) => new Date(a.date) - new Date(b.date));
   persistExerciseResults();
 }
 
-function setExerciseWeight(exerciseId, weight) {
-  const normalizedWeight = weight.trim() || weightText(exerciseById(exerciseId)?.weight);
+function setExerciseWeight(exerciseId, value) {
+  const currentData = weightDataForExercise(exerciseId);
+  const number = parseLocaleNumber(value);
+  if (value !== "" && number === null) return;
+  const weightData = {
+    ...currentData,
+    value: number,
+    unit: currentData.unit === "bodyweight" ? "kg" : currentData.unit,
+    needsReview: false,
+    reviewReason: "",
+    verified: true,
+    raw: "",
+  };
+  const normalizedWeight = formatWeightData(weightData);
+  saved.weightData[exerciseId] = weightData;
   saved.workingWeights[exerciseId] = normalizedWeight;
   const result = resultForExercise(exerciseId);
   result.workingWeight = normalizedWeight;
+  result.workingWeightData = weightData;
   const currentEntry = result.history.find((entry) => entry.weekKey === currentWeek.key);
   if (currentEntry) {
     currentEntry.weight = normalizedWeight;
+    currentEntry.weightData = weightData;
     currentEntry.date = new Date().toISOString();
   }
   persist();
@@ -1522,8 +1721,7 @@ function setExerciseStrengthField(exerciseId, field, value) {
   if (!exercise) return;
   const current = strengthForExercise(exercise);
   saved.strength[exerciseId] = {
-    actualSets: current.actualSets,
-    actualReps: current.actualReps,
+    ...saved.strength[exerciseId],
     [field]: String(value).trim(),
   };
   const currentEntry = resultForExercise(exerciseId).history.find((entry) => entry.weekKey === currentWeek.key);
@@ -1535,13 +1733,30 @@ function setExerciseStrengthField(exerciseId, field, value) {
   persist();
 }
 
+function setExerciseSetRep(exerciseId, index, value) {
+  const exercise = exerciseById(exerciseId);
+  if (!exercise) return;
+  const current = strengthForExercise(exercise);
+  const setResults = Array.from({ length: current.targetSets }, (_, setIndex) => ({
+    reps: setIndex === index ? (parseLocaleNumber(value) ?? "") : (current.setResults[setIndex]?.reps ?? ""),
+  }));
+  saved.strength[exerciseId] = { ...saved.strength[exerciseId], setResults };
+  const existing = resultForExercise(exerciseId).history.find((entry) => entry.weekKey === currentWeek.key);
+  if (existing) {
+    existing.setResults = setResults;
+    existing.date = new Date().toISOString();
+    persistExerciseResults();
+  }
+  persist();
+}
+
 function isCardioRoutine(section, item) {
   const text = normalize(`${section.kind} ${section.title} ${item.title} ${item.amount} ${item.technique}`);
   return section.kind === "entry" || section.kind === "interval" || /кардио|эллипс|гребл|велотренаж|дорожк|велосипед/.test(text);
 }
 
 function cardioFieldsFor(key) {
-  return saved.cardio?.[key] || {};
+  return normalizeCardioEntry(saved.cardio?.[key] || {});
 }
 
 function cardioDefaultMinutes(amount) {
@@ -1554,11 +1769,11 @@ function cardioDefaultMinutes(amount) {
 
 function cardioDistanceFor(minutes) {
   return {
-    10: "0.8 км",
-    15: "1.2 км",
-    20: "1.6 км",
-    30: "2.4 км",
-  }[String(minutes)] || "";
+    10: 0.8,
+    15: 1.2,
+    20: 1.6,
+    30: 2.4,
+  }[String(minutes)] ?? "";
 }
 
 function cardioCaloriesFor(minutes) {
@@ -1584,30 +1799,36 @@ function cardioDefaultsFor(key, item) {
   const minutes = cardioDefaultMinutes(item.amount);
   if (key.startsWith("thu-entry")) {
     return {
-      level: "6",
+      levelValue: 6,
       minutes: "30",
-      distance: "2.0-2.4 км",
-      calories: "140-180",
+      distanceValue: 2.2,
+      calories: 160,
     };
   }
   return {
-    level: cardioDefaultLevel(key, item),
+    levelValue: cardioDefaultLevel(key, item),
     minutes,
-    distance: cardioDistanceFor(minutes),
+    distanceValue: cardioDistanceFor(minutes),
+    distanceUnit: "km",
     calories: cardioCaloriesFor(minutes),
   };
 }
 
 function cardioFieldValue(stored, defaults, field) {
   const value = stored?.[field];
-  if (field === "calories" && value !== undefined && value !== "" && Number(value) <= 1) return defaults[field] || "";
-  return value !== undefined && value !== "" ? value : defaults[field] || "";
+  if (field === "calories" && value !== undefined && value !== null && value !== "" && Number(value) <= 1) return defaults[field] || "";
+  return value !== undefined && value !== null && value !== "" ? value : defaults[field] || "";
 }
 
 function setRoutineCardioField(key, field, value) {
+  const parsed = parseLocaleNumber(value);
+  if (value !== "" && parsed === null) return;
   saved.cardio[key] = {
     ...cardioFieldsFor(key),
-    [field]: String(value).trim(),
+    version: 2,
+    [field]: value === "" ? null : parsed,
+    needsReview: false,
+    reviewReason: "",
   };
   persist();
 }
@@ -2057,11 +2278,12 @@ function renderRoutineSection(section) {
         }
         ${showCardioFields ? `
           <div class="routine-cardio-fields" aria-label="Результат кардио">
-            <label><span>Уровень / мощность</span><input type="text" value="${escapeHtml(cardioFieldValue(cardioFields, cardioDefaults, "level"))}" data-cardio-field="level" /></label>
-            <label><span>Минуты</span><input type="number" inputmode="decimal" step="0.1" value="${escapeHtml(cardioFieldValue(cardioFields, cardioDefaults, "minutes"))}" data-cardio-field="minutes" /></label>
-            <label><span>Дистанция</span><input type="text" placeholder="км или м" value="${escapeHtml(cardioFieldValue(cardioFields, cardioDefaults, "distance"))}" data-cardio-field="distance" /></label>
-            <label><span>Калории</span><input type="number" inputmode="decimal" value="${escapeHtml(cardioFieldValue(cardioFields, cardioDefaults, "calories"))}" data-cardio-field="calories" /></label>
+            <label><span>Уровень / мощность</span><input type="text" inputmode="decimal" pattern="^-?\\d*[.,]?\\d*$" value="${escapeHtml(cardioFieldValue(cardioFields, cardioDefaults, "levelValue"))}" data-cardio-field="levelValue" /></label>
+            <label><span>Минуты</span><span class="number-with-unit"><input type="text" inputmode="decimal" pattern="^-?\\d*[.,]?\\d*$" value="${escapeHtml(cardioFieldValue(cardioFields, cardioDefaults, "minutes"))}" data-cardio-field="minutes" /><span>мин</span></span></label>
+            <label><span>Дистанция</span><span class="number-with-unit"><input type="text" inputmode="decimal" pattern="^-?\\d*[.,]?\\d*$" value="${escapeHtml(cardioFieldValue(cardioFields, cardioDefaults, "distanceValue"))}" data-cardio-field="distanceValue" /><span>${escapeHtml(cardioFields.distanceUnit || cardioDefaults.distanceUnit || "km") === "m" ? "м" : "км"}</span></span></label>
+            <label><span>Калории</span><span class="number-with-unit"><input type="text" inputmode="numeric" pattern="^\\d*$" value="${escapeHtml(cardioFieldValue(cardioFields, cardioDefaults, "calories"))}" data-cardio-field="calories" /><span>ккал</span></span></label>
           </div>
+          ${cardioFields.needsReview ? `<p class="data-warning">Требует проверки: ${escapeHtml(cardioFields.reviewReason)}</p>` : ""}
         ` : ""}
       </div>
     `;
@@ -2158,6 +2380,7 @@ function renderPoolSession(section) {
 function renderExercise(item, order) {
   const template = document.querySelector("#exerciseTemplate");
   const node = template.content.firstElementChild.cloneNode(true);
+  node.dataset.exerciseId = item.id;
   node.classList.toggle("is-quick", state.quickMode);
   node.role = "button";
   node.tabIndex = 0;
@@ -2207,35 +2430,67 @@ function renderExercise(item, order) {
     const currentFeedback = saved.feedback?.[item.id] || "";
     const recommendationFeedback = currentFeedback || previous?.feedback || "";
     const history = [...(result.history || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
+    const weightData = weightDataForExercise(item.id);
+    const setInputs = Array.from({ length: strength.targetSets }, (_, index) => strength.setResults[index]?.reps ?? "");
+    const legacyPerformance = !strength.setResults.length && strength.actualSets && strength.actualReps
+      ? `${strength.actualSets} подхода × ${strength.actualReps} повторений (старый формат)`
+      : "";
     resultPanel.innerHTML = `
-      <label class="working-weight">
+      <div class="working-weight">
         <span>Рабочий вес</span>
-        <input
-          type="text"
-          inputmode="decimal"
-          value="${escapeHtml(workingWeightFor(item.id))}"
-          aria-label="Рабочий вес: ${escapeHtml(item.title)}"
-        />
-      </label>
-      <div class="strength-fields" aria-label="Подходы и повторы">
+        ${weightData.unit === "bodyweight" ? `<strong>Без веса</strong>` : `
+          <label class="number-with-unit">
+            <input
+              type="text"
+              inputmode="decimal"
+              pattern="^-?\\d*[.,]?\\d*$"
+              value="${escapeHtml(weightData.value ?? parseLocaleNumber(weightData.raw) ?? "")}"
+              data-weight-value
+              aria-label="Рабочий вес: ${escapeHtml(item.title)}"
+            />
+            <span>кг${weightData.perSide ? ` / ${escapeHtml(weightData.sideLabel || "рука")}` : ""}</span>
+          </label>
+        `}
+        ${weightData.needsReview ? `<small class="data-warning">Требует проверки: ${escapeHtml(weightData.reviewReason)}</small>` : ""}
+      </div>
+      <div class="set-result-fields" aria-label="${strength.unit === "повт." ? "Повторы" : "Время"} по подходам">
+        <span class="field-label">${strength.unit === "повт." ? "Повторы по подходам" : `Время по подходам, ${escapeHtml(strength.unit)}`}</span>
+        <div>
+          ${setInputs.map((value, index) => `
+            <label>
+              <span>Подход ${index + 1}</span>
+              <input type="number" min="0" inputmode="numeric" value="${escapeHtml(value)}" data-set-reps="${index}" />
+            </label>
+          `).join("")}
+        </div>
+        ${legacyPerformance ? `<small>Прошлая запись: ${escapeHtml(legacyPerformance)}. Распределение по подходам не выдумываем.</small>` : ""}
+      </div>
+      <div class="strength-state-fields">
         <label>
-          <span>Подходы</span>
-          <input type="text" inputmode="decimal" value="${escapeHtml(strength.actualSets)}" data-strength-field="actualSets" />
+          <span>RIR последнего подхода</span>
+          <select data-strength-field="rir">
+            <option value="">Не отмечено</option>
+            ${Object.entries(rirOptions).map(([value, label]) => `<option value="${value}" ${strength.rir === value ? "selected" : ""}>${label}</option>`).join("")}
+          </select>
         </label>
         <label>
-          <span>Повторы</span>
-          <input type="text" value="${escapeHtml(strength.actualReps)}" data-strength-field="actualReps" />
+          <span>Техника / самочувствие</span>
+          <select data-strength-field="techniqueStatus">
+            <option value="">Не отмечено</option>
+            ${Object.entries(techniqueOptions).map(([value, label]) => `<option value="${value}" ${strength.techniqueStatus === value ? "selected" : ""}>${label}</option>`).join("")}
+          </select>
         </label>
       </div>
       <p class="previous-result">
         <strong>Прошлый результат:</strong>
         ${
           previous
-            ? `${escapeHtml(previous.weight)} · ${escapeHtml(performanceText(previous) || "подходы не указаны")} · ${escapeHtml(effortReportLabels[previous.feedback] || "не отмечено")}`
+            ? `${escapeHtml(previous.weight)} · ${escapeHtml(performanceText(previous) || "повторы не указаны")} · RIR ${escapeHtml(rirOptions[previous.rir] || "—")} · ${escapeHtml(effortReportLabels[previous.feedback] || "не отмечено")}`
             : "пока нет данных"
         }
       </p>
       <p class="exercise-recommendation">${escapeHtml(strengthRecommendation(item.id, recommendationFeedback))}</p>
+      ${exerciseProgressionGuidance[item.id] ? `<p class="exercise-guidance"><strong>Ближайшая подсказка:</strong> ${escapeHtml(exerciseProgressionGuidance[item.id])}</p>` : ""}
       <details class="exercise-history">
         <summary>История упражнения (${history.length})</summary>
         ${
@@ -2245,26 +2500,38 @@ function renderExercise(item, order) {
                   <time datetime="${escapeHtml(entry.date)}">${new Date(entry.date).toLocaleDateString("ru-RU")}</time>
                   <span>${escapeHtml(entry.weight)}</span>
                   <span>${escapeHtml(performanceText(entry) || "—")}</span>
-                  <strong>${escapeHtml(effortReportLabels[entry.feedback] || "не отмечено")}</strong>
+                  <strong>RIR ${escapeHtml(rirOptions[entry.rir] || "—")} · ${escapeHtml(effortReportLabels[entry.feedback] || "не отмечено")}${entry.techniqueStatus ? ` · ${escapeHtml(techniqueOptions[entry.techniqueStatus] || entry.techniqueStatus)}` : ""}</strong>
                 </li>
               `).join("")}</ul>`
             : `<p>История появится после первой оценки нагрузки.</p>`
         }
       </details>
     `;
-    const weightInput = resultPanel.querySelector("input");
-    weightInput.addEventListener("click", (event) => event.stopPropagation());
-    weightInput.addEventListener("keydown", (event) => event.stopPropagation());
-    weightInput.addEventListener("input", (event) => {
+    const weightInput = resultPanel.querySelector("[data-weight-value]");
+    weightInput?.addEventListener("click", (event) => event.stopPropagation());
+    weightInput?.addEventListener("keydown", (event) => event.stopPropagation());
+    weightInput?.addEventListener("change", (event) => {
       event.stopPropagation();
       setExerciseWeight(item.id, event.target.value);
+      renderResultPanel();
+      renderDataReview();
     });
-    resultPanel.querySelectorAll("[data-strength-field]").forEach((input) => {
+    resultPanel.querySelectorAll("[data-set-reps]").forEach((input) => {
       input.addEventListener("click", (event) => event.stopPropagation());
       input.addEventListener("keydown", (event) => event.stopPropagation());
       input.addEventListener("input", (event) => {
         event.stopPropagation();
+        setExerciseSetRep(item.id, Number(input.dataset.setReps), event.target.value);
+      });
+    });
+    resultPanel.querySelectorAll("[data-strength-field]").forEach((input) => {
+      input.addEventListener("click", (event) => event.stopPropagation());
+      input.addEventListener("keydown", (event) => event.stopPropagation());
+      input.addEventListener("change", (event) => {
+        event.stopPropagation();
         setExerciseStrengthField(item.id, input.dataset.strengthField, event.target.value);
+        saveExerciseResult(item.id, saved.feedback?.[item.id] || "");
+        renderResultPanel();
       });
     });
     resultPanel.querySelector("details").addEventListener("click", (event) => event.stopPropagation());
@@ -2369,41 +2636,111 @@ function latestBodyEntry() {
   return newestFirst(bodyMetrics.entries || [])[0] || { date: new Date().toISOString().slice(0, 10), ...bodyMetricDefaults };
 }
 
+function trendChartMarkup(label, field, unit) {
+  const entries = [...(bodyMetrics.entries || [])]
+    .filter((entry) => parseLocaleNumber(entry[field]) !== null)
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .slice(-12);
+  const change = fourWeekChange(entries, field);
+  if (entries.length < 2) {
+    return `<article class="trend-chart"><strong>${label}</strong><p>График появится после второго измерения.</p></article>`;
+  }
+  const values = entries.map((entry) => parseLocaleNumber(entry[field]));
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const points = values.map((value, index) => {
+    const x = entries.length === 1 ? 140 : 8 + (index * 264) / (entries.length - 1);
+    const y = 70 - ((value - min) / span) * 54;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return `
+    <article class="trend-chart">
+      <div><strong>${label}</strong><span>${change === null ? "—" : `${change > 0 ? "+" : ""}${formatNumber(change)} ${unit}`} за 4 недели</span></div>
+      <svg viewBox="0 0 280 80" role="img" aria-label="Тренд: ${escapeHtml(label)}">
+        <polyline points="${points}" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></polyline>
+      </svg>
+      <small>${formatNumber(values.at(-1))} ${unit} · ${new Date(entries.at(-1).date).toLocaleDateString("ru-RU")}</small>
+    </article>
+  `;
+}
+
+function duplicateDecisionKey(pair) {
+  return `${pair.previous.date}|${pair.duplicate.date}`;
+}
+
 function renderBodyTracker() {
   if (!els.bodyTracker) return;
   const latest = latestBodyEntry();
+  const duplicatePairs = duplicateBodyPairs(bodyMetrics.entries || [], bodyComparisonFields)
+    .filter((pair) => !bodyMetrics.duplicateDecisions?.[duplicateDecisionKey(pair)]);
   els.bodyTracker.innerHTML = `
     <div class="tracker-header">
       <div>
         <p class="eyebrow">Показатели тела</p>
         <h2>Тело</h2>
-        <p>Быстрая запись данных с весов. Показатели бытовых весов лучше смотреть по динамике, а не как медицински точные значения.</p>
+        <p>Показатели биоимпедансных весов могут меняться из-за воды, еды, времени измерения и недавней тренировки. Оценивай тенденцию минимум за 3-4 недели.</p>
       </div>
     </div>
+    <section class="current-goal">
+      <p class="eyebrow">Текущая цель · 6-8 недель</p>
+      <h3>Рекомпозиция тела</h3>
+      <ul>
+        <li>Удерживать средний вес в диапазоне 76-77 кг.</li>
+        <li>Постепенно увеличивать силовые показатели без заметного роста талии.</li>
+        <li>Ориентир по белку: 120-140 г в сутки.</li>
+      </ul>
+    </section>
     <div class="body-current">
       ${[
         ["weightKg", "Вес", "кг"],
-        ["targetWeightKg", "Цель", "кг"],
+        ["weeklyAverageWeightKg", "Средний вес", "кг"],
         ["bodyFatPercent", "Жир", "%"],
         ["muscleMassKg", "Мышцы", "кг"],
       ].map(([key, label, unit]) => `
         <article>
           <span>${label}</span>
-          <strong>${escapeHtml(latest[key] ?? bodyMetricDefaults[key] ?? "—")} ${unit}</strong>
+          <strong>${latest[key] === "" || latest[key] === undefined || latest[key] === null ? "—" : `${escapeHtml(formatNumber(latest[key]))} ${unit}`}</strong>
         </article>
       `).join("")}
+    </div>
+    ${duplicatePairs.length ? `
+      <div class="duplicate-warning">
+        <strong>Похоже, эта запись дублирует предыдущее измерение.</strong>
+        ${duplicatePairs.map((pair) => `
+          <div data-duplicate="${escapeHtml(duplicateDecisionKey(pair))}">
+            <span>${new Date(pair.previous.date).toLocaleDateString("ru-RU")} и ${new Date(pair.duplicate.date).toLocaleDateString("ru-RU")}</span>
+            <button type="button" data-duplicate-action="keep">Оставить</button>
+            <button type="button" data-duplicate-action="delete">Удалить запись</button>
+            <button type="button" data-duplicate-action="merge">Объединить</button>
+          </div>
+        `).join("")}
+      </div>
+    ` : ""}
+    <div class="body-trends">
+      ${trendChartMarkup("Вес", "weightKg", "кг")}
+      ${trendChartMarkup("Средний вес", "weeklyAverageWeightKg", "кг")}
+      ${trendChartMarkup("Талия", "waistCm", "см")}
+      ${trendChartMarkup("Жир", "bodyFatPercent", "%")}
+      ${trendChartMarkup("Мышечная масса", "muscleMassKg", "кг")}
     </div>
     <form class="tracker-form body-form">
       <label><span>Дата</span><input name="date" type="date" value="${new Date().toISOString().slice(0, 10)}" /></label>
       ${bodyMetricFields.map(([key, label, unit]) => `
         <label>
           <span>${label}${unit ? `, ${unit}` : ""}</span>
-          <input name="${key}" type="number" inputmode="decimal" step="0.01" value="${escapeHtml(latest[key] ?? "")}" />
+          <input name="${key}" type="text" inputmode="decimal" pattern="^-?\\d*[.,]?\\d*$" value="${escapeHtml(latest[key] ?? "")}" />
         </label>
       `).join("")}
-      <label class="is-wide"><span>Заметки</span><textarea name="notes" placeholder="Сон, питание, тренировки, самочувствие">${escapeHtml(latest.notes || "")}</textarea></label>
+      <label><span>Общее восстановление</span><select name="recovery">${Object.entries(recoveryOptions).map(([value, label]) => `<option value="${value}" ${latest.recovery === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+      <label class="is-wide"><span>Комментарий</span><textarea name="comments" placeholder="Сон, питание, тренировки, самочувствие">${escapeHtml(latest.comments || latest.notes || "")}</textarea></label>
+      <p class="form-error is-wide" data-body-error role="alert"></p>
       <button type="submit">Сохранить показатели</button>
     </form>
+    <details class="body-history">
+      <summary>История измерений (${bodyMetrics.entries?.length || 0})</summary>
+      <ul>${newestFirst(bodyMetrics.entries || []).map((entry) => `<li><time>${new Date(entry.date).toLocaleDateString("ru-RU")}</time><span>${formatNumber(entry.weightKg)} кг</span><span>талия ${entry.waistCm === "" || entry.waistCm === undefined ? "—" : `${formatNumber(entry.waistCm)} см`}</span><span>${escapeHtml(recoveryOptions[entry.recovery] || "—")}</span></li>`).join("")}</ul>
+    </details>
   `;
 
   els.bodyTracker.querySelector(".body-form").addEventListener("submit", (event) => {
@@ -2412,17 +2749,248 @@ function renderBodyTracker() {
     const entry = {
       date: form.elements.date.value || new Date().toISOString().slice(0, 10),
       updatedAt: new Date().toISOString(),
-      notes: form.elements.notes.value.trim(),
+      comments: form.elements.comments.value.trim(),
+      notes: form.elements.comments.value.trim(),
+      recovery: form.elements.recovery.value,
     };
+    const invalid = [];
     bodyMetricFields.forEach(([key]) => {
       const value = form.elements[key].value;
-      entry[key] = value === "" ? "" : Number(value);
+      const parsed = parseLocaleNumber(value);
+      if (value !== "" && parsed === null) invalid.push(key);
+      entry[key] = value === "" ? "" : parsed;
     });
+    if (invalid.length) {
+      form.querySelector("[data-body-error]").textContent = "Проверьте числовые поля: допустимы только числа с точкой или запятой.";
+      return;
+    }
     const existingIndex = bodyMetrics.entries.findIndex((item) => item.date === entry.date);
     if (existingIndex >= 0) bodyMetrics.entries[existingIndex] = { ...bodyMetrics.entries[existingIndex], ...entry };
     else bodyMetrics.entries.push(entry);
     persistBodyMetrics();
     renderBodyTracker();
+    renderDataReview();
+  });
+
+  els.bodyTracker.querySelectorAll("[data-duplicate-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const container = button.closest("[data-duplicate]");
+      const key = container.dataset.duplicate;
+      const pair = duplicatePairs.find((item) => duplicateDecisionKey(item) === key);
+      if (!pair) return;
+      bodyMetrics.duplicateDecisions = bodyMetrics.duplicateDecisions || {};
+      if (button.dataset.duplicateAction === "keep") bodyMetrics.duplicateDecisions[key] = "keep";
+      if (button.dataset.duplicateAction === "delete") {
+        bodyMetrics.entries = bodyMetrics.entries.filter((entry) => entry !== pair.duplicate);
+      }
+      if (button.dataset.duplicateAction === "merge") {
+        pair.duplicate.comments = [pair.previous.comments || pair.previous.notes, pair.duplicate.comments || pair.duplicate.notes].filter(Boolean).join("; ");
+        bodyMetrics.entries = bodyMetrics.entries.filter((entry) => entry !== pair.previous);
+      }
+      persistBodyMetrics();
+      renderBodyTracker();
+      renderDataReview();
+    });
+  });
+}
+
+function persistDataReview() {
+  dataReviewState.updatedAt = new Date().toISOString();
+  localStorage.setItem(dataReviewStorageKey, JSON.stringify(dataReviewState));
+  cloudSync?.markLocalChange(dataReviewStorageKey, dataReviewState, dataReviewState.updatedAt);
+}
+
+function collectDataIssues() {
+  const issues = [];
+  Object.entries(exerciseResults.exercises || {}).forEach(([exerciseId, result]) => {
+    if (result.workingWeightData?.needsReview) {
+      issues.push({ id: `weight:${exerciseId}`, type: "weight", exerciseId, weightTarget: "working", weightData: result.workingWeightData, title: archivedExercises.find((item) => item.id === exerciseId)?.title || exerciseById(exerciseId)?.title || exerciseId, detail: result.workingWeightData.reviewReason, date: result.history?.at(-1)?.date || "" });
+    }
+    (result.history || []).forEach((entry, index) => {
+      if (entry.weightData?.needsReview) issues.push({ id: `weight-history:${exerciseId}:${index}`, type: "weight", exerciseId, weightTarget: "history", historyIndex: index, weightData: entry.weightData, title: archivedExercises.find((item) => item.id === exerciseId)?.title || exerciseById(exerciseId)?.title || exerciseId, detail: `${entry.weightData.reviewReason} Исходное значение: ${entry.weightData.raw || entry.weight || "—"}`, date: entry.date });
+    });
+    if (result.workingWeight && !(result.history || []).length) {
+      issues.push({ id: `no-history:${exerciseId}`, type: "history", exerciseId, title: archivedExercises.find((item) => item.id === exerciseId)?.title || exerciseById(exerciseId)?.title || exerciseId, detail: "Есть рабочий вес, но история упражнения пока отсутствует.", date: "" });
+    }
+  });
+
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    const match = /^workout-progress-(\d{4}-W\d{2})$/.exec(key || "");
+    if (!match) continue;
+    const progress = normalizeProgressV3(loadJson(key, emptyProgress()));
+    Object.entries(progress.cardio || {}).forEach(([cardioKey, cardio]) => {
+      if (cardio.needsReview) issues.push({ id: `cardio:${match[1]}:${cardioKey}`, type: "cardio", weekKey: match[1], cardioKey, cardio, dayId: cardioKey.slice(0, 3), title: `Кардио · ${match[1]}`, detail: cardio.reviewReason, date: match[1] });
+    });
+    workouts.forEach((day) => {
+      const hasFilledExercise = day.exercises.some((exercise) => progress.exercises?.[exercise.id]);
+      if (hasFilledExercise && progress.days?.[day.id] === false) issues.push({ id: `day:${match[1]}:${day.id}`, type: "day", dayId: day.id, title: `${day.day} · ${match[1]}`, detail: "Упражнения заполнены, но день отмечен как невыполненный.", date: match[1] });
+    });
+  }
+  duplicateBodyPairs(bodyMetrics.entries || [], bodyComparisonFields).forEach((pair) => {
+    const key = duplicateDecisionKey(pair);
+    if (!bodyMetrics.duplicateDecisions?.[key]) issues.push({ id: `duplicate:${key}`, type: "body", title: "Возможный дубликат состава тела", detail: `${pair.previous.date} и ${pair.duplicate.date} полностью совпадают.`, date: pair.duplicate.date });
+  });
+  return issues.filter((issue) => !dataReviewState.dismissed?.[issue.id]);
+}
+
+function reviewEditorMarkup(issue) {
+  if (issue.type === "weight") {
+    const sourceValue = issue.weightData?.value ?? parseLocaleNumber(issue.weightData?.raw) ?? "";
+    const selectedUnit = issue.weightData?.unit === "bodyweight"
+      ? "bodyweight"
+      : issue.weightData?.perSide ? `per-${issue.weightData.sideLabel || "рука"}` : "kg";
+    return `
+      <form class="data-review-editor" data-review-editor="weight" hidden>
+        <label><span>Вес</span><input name="value" type="text" inputmode="decimal" pattern="^-?\\d*[.,]?\\d*$" value="${escapeHtml(sourceValue)}" /></label>
+        <label><span>Единица</span><select name="unit">
+          <option value="kg" ${selectedUnit === "kg" ? "selected" : ""}>кг</option>
+          <option value="per-рука" ${selectedUnit === "per-рука" ? "selected" : ""}>кг / рука</option>
+          <option value="per-сторона" ${selectedUnit === "per-сторона" ? "selected" : ""}>кг / сторона</option>
+          <option value="bodyweight" ${selectedUnit === "bodyweight" ? "selected" : ""}>Без веса</option>
+        </select></label>
+        <button type="submit">Сохранить исправление</button>
+        <p class="form-error" data-review-error role="alert"></p>
+      </form>
+    `;
+  }
+  if (issue.type === "cardio") {
+    const cardio = issue.cardio || {};
+    return `
+      <form class="data-review-editor data-review-editor--cardio" data-review-editor="cardio" hidden>
+        <label><span>Уровень / мощность</span><input name="levelValue" type="text" inputmode="decimal" value="${escapeHtml(cardio.levelValue ?? "")}" /></label>
+        <label><span>Минуты</span><input name="minutes" type="text" inputmode="decimal" value="${escapeHtml(cardio.minutes ?? "")}" /></label>
+        <label><span>Дистанция</span><input name="distanceValue" type="text" inputmode="decimal" value="${escapeHtml(cardio.distanceValue ?? "")}" /></label>
+        <label><span>Единица</span><select name="distanceUnit"><option value="km" ${cardio.distanceUnit !== "m" ? "selected" : ""}>км</option><option value="m" ${cardio.distanceUnit === "m" ? "selected" : ""}>м</option></select></label>
+        <label><span>Калории</span><input name="calories" type="text" inputmode="decimal" value="${escapeHtml(cardio.calories ?? "")}" /></label>
+        <button type="submit">Сохранить исправление</button>
+        <p class="form-error" data-review-error role="alert"></p>
+      </form>
+    `;
+  }
+  return "";
+}
+
+function saveReviewedWeight(issue, form) {
+  const unit = form.elements.unit.value;
+  const value = unit === "bodyweight" ? null : parseLocaleNumber(form.elements.value.value);
+  if (unit !== "bodyweight" && value === null) throw new Error("Введите корректное числовое значение веса.");
+  const weightData = {
+    value,
+    unit: unit === "bodyweight" ? "bodyweight" : "kg",
+    perSide: unit.startsWith("per-"),
+    sideLabel: unit.startsWith("per-") ? unit.slice(4) : "рука",
+    raw: "",
+    needsReview: false,
+    reviewReason: "",
+    verified: true,
+  };
+  const result = resultForExercise(issue.exerciseId);
+  if (issue.weightTarget === "history") {
+    const entry = result.history?.[issue.historyIndex];
+    if (!entry) throw new Error("Историческая запись больше не найдена.");
+    entry.weightData = weightData;
+    entry.weight = formatWeightData(weightData);
+  } else {
+    result.workingWeightData = weightData;
+    result.workingWeight = formatWeightData(weightData);
+    if (exerciseById(issue.exerciseId)) {
+      saved.weightData[issue.exerciseId] = weightData;
+      saved.workingWeights[issue.exerciseId] = result.workingWeight;
+      persist();
+    }
+  }
+  persistExerciseResults();
+}
+
+function saveReviewedCardio(issue, form) {
+  const numericFields = ["levelValue", "minutes", "distanceValue", "calories"];
+  const values = Object.fromEntries(numericFields.map((field) => {
+    const raw = form.elements[field].value.trim();
+    const value = raw === "" ? null : parseLocaleNumber(raw);
+    if (raw !== "" && value === null) throw new Error("В числовых полях допустимы только числа с точкой или запятой.");
+    return [field, value];
+  }));
+  const storageKey = `workout-progress-${issue.weekKey}`;
+  const progress = normalizeProgressV3(loadJson(storageKey, emptyProgress()));
+  progress.cardio[issue.cardioKey] = {
+    version: 2,
+    ...values,
+    distanceUnit: form.elements.distanceUnit.value,
+    needsReview: false,
+    reviewReason: "",
+    legacy: issue.cardio?.legacy || {},
+  };
+  progress.updatedAt = new Date().toISOString();
+  localStorage.setItem(storageKey, JSON.stringify(progress));
+  cloudSync?.markLocalChange(storageKey, progress, progress.updatedAt);
+  if (storageKey === progressStorageKey) replaceObject(saved, { ...progress, notes: saved.notes || {} });
+}
+
+function renderDataReview() {
+  if (!els.dataReview) return;
+  const issues = collectDataIssues();
+  els.dataReview.innerHTML = `
+    <details>
+      <summary><span><strong>Проверка данных</strong><small>Некорректные значения, дубликаты и конфликты</small></span><em>${issues.length}</em></summary>
+      <div class="data-review-list">
+        ${issues.length ? issues.map((issue) => `
+          <article data-issue-id="${escapeHtml(issue.id)}">
+            <div><strong>${escapeHtml(issue.title)}</strong><span>${escapeHtml(issue.date || "Без даты")}</span><p>${escapeHtml(issue.detail)}</p></div>
+            <div class="data-review-actions"><button type="button" data-review-fix>Исправить</button><button type="button" data-review-dismiss>Оставить как есть</button></div>
+            ${reviewEditorMarkup(issue)}
+          </article>
+        `).join("") : `<p class="empty">Явных конфликтов не найдено.</p>`}
+      </div>
+      <details class="archive-list"><summary>Архивные упражнения</summary>${archivedExercises.map((item) => {
+        const result = exerciseResults.exercises?.[item.id];
+        const history = newestFirst(result?.history || []);
+        return `<article><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(result?.workingWeight || item.lastWeight)}</span><p>${escapeHtml(item.note)}</p></div><details class="archive-history"><summary>История (${history.length})</summary>${history.length ? `<ul>${history.map((entry) => `<li><time>${new Date(entry.date).toLocaleDateString("ru-RU")}</time><span>${escapeHtml(entry.weight || "—")}</span><span>${escapeHtml(performanceText(entry) || "—")}</span><strong>${escapeHtml(effortReportLabels[entry.feedback] || "не отмечено")}</strong></li>`).join("")}</ul>` : `<p>История пока пуста.</p>`}</details></article>`;
+      }).join("")}</details>
+    </details>
+  `;
+  els.dataReview.querySelectorAll("[data-review-dismiss]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const issueId = button.closest("[data-issue-id]").dataset.issueId;
+      dataReviewState.dismissed = { ...(dataReviewState.dismissed || {}), [issueId]: true };
+      persistDataReview();
+      renderDataReview();
+    });
+  });
+  els.dataReview.querySelectorAll("[data-review-fix]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const issue = issues.find((item) => item.id === button.closest("[data-issue-id]").dataset.issueId);
+      if (!issue) return;
+      const editor = button.closest("[data-issue-id]").querySelector("[data-review-editor]");
+      if (editor) {
+        editor.hidden = !editor.hidden;
+        if (!editor.hidden) editor.querySelector("input, select")?.focus({ preventScroll: true });
+        return;
+      }
+      if (issue.type === "body") return els.bodyTracker.scrollIntoView({ behavior: "smooth", block: "start" });
+      const day = issue.dayId ? workouts.find((item) => item.id === issue.dayId) : dayForExercise(issue.exerciseId);
+      if (day) {
+        state.activeDayId = day.id;
+        renderDayDetails();
+        document.querySelector(`[data-exercise-id="${issue.exerciseId || ""}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    });
+  });
+  els.dataReview.querySelectorAll("[data-review-editor]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const issue = issues.find((item) => item.id === form.closest("[data-issue-id]").dataset.issueId);
+      if (!issue) return;
+      try {
+        if (form.dataset.reviewEditor === "weight") saveReviewedWeight(issue, form);
+        if (form.dataset.reviewEditor === "cardio") saveReviewedCardio(issue, form);
+        renderDataReview();
+        renderDayDetails();
+      } catch (error) {
+        form.querySelector("[data-review-error]").textContent = error.message;
+      }
+    });
   });
 }
 
@@ -2732,6 +3300,7 @@ function render() {
   renderLoadSummary();
   renderWeeklyReport();
   renderBodyTracker();
+  renderDataReview();
 }
 
 els.searchInput.addEventListener("input", (event) => {
@@ -2748,6 +3317,7 @@ els.quickMode.addEventListener("change", (event) => {
 els.todayButton.addEventListener("click", () => selectDay(todayWorkoutId()));
 
 renderLists();
+migrateWeeklyDataV3();
 migrateFridayPoolCompletion();
 syncAllDayCompletion();
 persist({ sync: false, touch: false });
