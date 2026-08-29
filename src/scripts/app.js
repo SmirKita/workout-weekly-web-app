@@ -1,4 +1,13 @@
 import { archivedExercises, filters, progression, safety, workouts } from "../data/workouts.js";
+import {
+  acceptRecommendation,
+  calculateSessionEffort,
+  createCurrentPlan,
+  CURRENT_PLAN_VERSION,
+  currentPlanStorageKey,
+  effortCategory,
+  validateCurrentPlan,
+} from "../data/current-plan.js";
 import { createWorkoutCloudSync } from "./cloud-sync.js";
 import {
   duplicateBodyPairs,
@@ -42,6 +51,7 @@ const legacyFridayPoolCompletionKeys = [
 const backupFileName = "backup-workout-weekly.json";
 const authLinkCooldownMs = 60 * 1000;
 const saved = loadSaved();
+let currentPlan = loadCurrentPlan();
 let exerciseResults;
 const cardioResults = loadCardioResults();
 let bodyMetrics;
@@ -86,51 +96,13 @@ const groupLabels = {
   finish: "Завершение",
 };
 
-const effortLevels = [
-  {
-    value: "easy",
-    score: "1",
-    label: "Легко",
-    report: "легко",
-    summary: "Легко",
-    hint: "Большой запас. Можно прибавить вес или повторы, если техника чистая.",
-  },
-  {
-    value: "normal-light",
-    score: "2",
-    label: "Норма ближе к легко",
-    report: "норма ближе к легко",
-    summary: "Норма ближе к легко",
-    hint: "Рабоче, но запас ещё большой. Если повторится, можно чуть повысить.",
-  },
-  {
-    value: "normal",
-    score: "3",
-    label: "Норма",
-    report: "норма",
-    summary: "Норма",
-    hint: "Вес подходит. Оставляем и закрепляем технику.",
-  },
-  {
-    value: "normal-hard",
-    score: "4",
-    label: "Норма ближе к тяжело",
-    report: "норма ближе к тяжело",
-    summary: "Норма ближе к тяжело",
-    hint: "Хорошая нагрузка для роста. Последние повторы ощутимые, техника чистая.",
-  },
-  {
-    value: "hard",
-    score: "5",
-    label: "Тяжело",
-    report: "тяжело",
-    summary: "Тяжело",
-    hint: "Вес не повышать. Если техника ломалась, лучше оставить или снизить.",
-  },
-];
+const effortLevels = Array.from({ length: 10 }, (_, index) => {
+  const score = index + 1;
+  return { value: score, score: String(score), label: effortCategory(score) };
+});
 
 function effortLevelFor(value) {
-  return effortLevels.find((level) => level.value === value) || null;
+  return effortLevels.find((level) => level.value === Number(value)) || null;
 }
 
 const fatigueOptions = {
@@ -251,20 +223,6 @@ const rirOptions = {
   "0": "0",
 };
 
-const exerciseProgressionGuidance = {
-  "leg-extension": "Можно пробовать следующую ступень на первом подходе; ориентир после повышения — 12 повторений.",
-  "pallof-press": "Можно попробовать небольшую ступень вверх или оставить вес и добавить паузу 1-2 секунды.",
-  "shoulder-press": "Можно попробовать 9 кг / рука; если 9 кг нет — один пробный подход 10 кг на 8 повторений.",
-  "hammer-curl": "Можно попробовать 8 кг / рука, начав с 10 повторений.",
-  "close-grip-push-up": "Прогрессировать медленным опусканием за 3 секунды или немного повысить положение ног.",
-  "leg-press": "Повышать только если после 12-го повторения остаётся минимум RIR 2.",
-  "romanian-deadlift": "Сначала довести до 11-12 чистых повторений, затем обсуждать повышение.",
-  "lat-pulldown": "Пока сохранить 40 кг и сосредоточиться на технике.",
-  "reverse-fly": "Пока сохранить 12 кг и сосредоточиться на технике.",
-  "lateral-raise": "Пока сохранить 5 кг / рука и сосредоточиться на технике.",
-  "hip-thrust": "Пока сохранить 10 кг и сосредоточиться на технике.",
-};
-
 bodyMetrics = loadBodyMetrics();
 migrateWeeklyResults();
 
@@ -314,7 +272,7 @@ function getWeekInfoFromKey(key) {
 
 function emptyProgress() {
   return {
-    version: 3,
+    version: 4,
     days: {},
     exercises: {},
     feedback: {},
@@ -322,6 +280,10 @@ function emptyProgress() {
     workingWeights: {},
     weightData: {},
     strength: {},
+    effortRatings: {},
+    sessionEffort: {},
+    sessionOrder: {},
+    currentPlanVersion: CURRENT_PLAN_VERSION,
     cardio: {},
   };
 }
@@ -332,6 +294,22 @@ function loadJson(key, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function loadCurrentPlan() {
+  const stored = loadJson(currentPlanStorageKey, null);
+  const planState = createCurrentPlan(stored);
+  if (!stored || stored.version !== planState.version) {
+    planState.updatedAt = new Date().toISOString();
+    localStorage.setItem(currentPlanStorageKey, JSON.stringify(planState));
+  }
+  return planState;
+}
+
+function persistCurrentPlan({ sync = true } = {}) {
+  currentPlan.updatedAt = new Date().toISOString();
+  localStorage.setItem(currentPlanStorageKey, JSON.stringify(currentPlan));
+  if (sync) cloudSync?.markLocalChange(currentPlanStorageKey, currentPlan, currentPlan.updatedAt);
 }
 
 function savedForWeek(weekKey) {
@@ -493,7 +471,15 @@ function loadBodyMetrics() {
 }
 
 function normalizeProgressV3(progress) {
-  const next = { ...emptyProgress(), ...progress, version: 3 };
+  const next = { ...emptyProgress(), ...progress, version: 4 };
+  if (progress.currentPlanVersion !== CURRENT_PLAN_VERSION) {
+    next.workingWeights = {};
+    next.weightData = {};
+  }
+  next.currentPlanVersion = CURRENT_PLAN_VERSION;
+  next.effortRatings = { ...(progress.effortRatings || {}) };
+  next.sessionEffort = { ...(progress.sessionEffort || {}) };
+  next.sessionOrder = { ...(progress.sessionOrder || {}) };
   next.weightData = { ...(progress.weightData || {}) };
   Object.entries(progress.workingWeights || {}).forEach(([exerciseId, weight]) => {
     if (!next.weightData[exerciseId]) next.weightData[exerciseId] = normalizeWeightData(weight);
@@ -608,7 +594,7 @@ function persist({ sync = true, touch = true } = {}) {
   const updatedAt = touch ? new Date().toISOString() : (saved.updatedAt || new Date().toISOString());
   saved.updatedAt = updatedAt;
   const progressPayload = {
-    version: 3,
+    version: 4,
     days: saved.days,
     exercises: saved.exercises,
     feedback: saved.feedback || {},
@@ -616,6 +602,10 @@ function persist({ sync = true, touch = true } = {}) {
     workingWeights: saved.workingWeights || {},
     weightData: saved.weightData || {},
     strength: saved.strength || {},
+    effortRatings: saved.effortRatings || {},
+    sessionEffort: saved.sessionEffort || {},
+    sessionOrder: saved.sessionOrder || {},
+    currentPlanVersion: CURRENT_PLAN_VERSION,
     cardio: saved.cardio || {},
     updatedAt,
   };
@@ -699,7 +689,7 @@ function workoutBackupRecords() {
 function createWorkoutBackup() {
   return {
     app: "workout-weekly-web-app",
-    version: 2,
+    version: 4,
     exportedAt: new Date().toISOString(),
     records: workoutBackupRecords(),
   };
@@ -756,10 +746,11 @@ function applyRemoteData(keys) {
   const affectsCurrentProgress = keys.includes(progressStorageKey);
   const affectsCurrentNotes = keys.includes(notesStorageKey);
   const affectsResults = keys.includes(exerciseResultsStorageKey);
+  const affectsPlan = keys.includes(currentPlanStorageKey);
   const affectsCardio = keys.includes(cardioResultsStorageKey);
   const affectsBody = keys.includes(bodyMetricsStorageKey);
   const affectsReview = keys.includes(dataReviewStorageKey);
-  if (!affectsCurrentProgress && !affectsCurrentNotes && !affectsResults && !affectsCardio && !affectsBody && !affectsReview) {
+  if (!affectsCurrentProgress && !affectsCurrentNotes && !affectsResults && !affectsPlan && !affectsCardio && !affectsBody && !affectsReview) {
     renderHistory();
     renderWeeklyReport();
     return;
@@ -770,6 +761,7 @@ function applyRemoteData(keys) {
   const focusedElement = document.activeElement;
   if (affectsCurrentProgress || affectsCurrentNotes) replaceObject(saved, loadSaved());
   if (affectsResults) replaceObject(exerciseResults, loadExerciseResults());
+  if (affectsPlan) replaceObject(currentPlan, loadCurrentPlan());
   if (affectsCardio) replaceObject(cardioResults, loadCardioResults());
   if (affectsBody) replaceObject(bodyMetrics, loadBodyMetrics());
   if (affectsReview) replaceObject(dataReviewState, loadJson(dataReviewStorageKey, { dismissed: {}, updatedAt: "" }));
@@ -873,7 +865,7 @@ function statsForSaved(source) {
 }
 
 function feedbackStatsForSaved(source) {
-  const counts = Object.fromEntries(effortLevels.map((level) => [level.value, 0]));
+  const counts = Object.fromEntries(Object.keys(effortReportLabels).map((value) => [value, 0]));
   const easy = [];
   const normalLight = [];
   const normalHard = [];
@@ -934,12 +926,15 @@ function targetFromSets(value) {
 }
 
 function strengthForExercise(exercise) {
-  const target = targetFromSets(exercise?.sets);
+  const planEntry = currentPlan.exercises?.[exercise?.id];
+  const target = planEntry
+    ? targetFromSets(`${planEntry.targetSets} x ${planEntry.targetReps}`)
+    : targetFromSets(exercise?.sets);
   const stored = saved.strength?.[exercise.id] || {};
   const setResults = setResultsFrom(stored.setResults);
   return {
-    targetSets: stored.targetSets || target.targetSets,
-    targetReps: stored.targetReps || target.targetReps,
+    targetSets: planEntry?.targetSets || stored.targetSets || target.targetSets,
+    targetReps: planEntry?.targetReps || stored.targetReps || target.targetReps,
     actualSets: stored.actualSets || "",
     actualReps: stored.actualReps || "",
     setResults,
@@ -1579,7 +1574,84 @@ function setDayCompletion(day, done) {
   });
   syncDayCompletion(day);
   persist();
+  if (done) offerActualWeightsAsPlan(day);
   render();
+}
+
+function offerActualWeightsAsPlan(day) {
+  day.exercises.forEach((exercise) => {
+    const actual = saved.weightData?.[exercise.id];
+    const planned = currentPlan.exercises?.[exercise.id]?.currentWeightData;
+    if (!actual || !planned || formatWeightData(actual) === formatWeightData(planned)) return;
+    if (!window.confirm(`Сделать ${formatWeightData(actual)} новым рабочим весом для «${exercise.title}»?`)) return;
+    currentPlan.exercises[exercise.id].previousWeightData = planned;
+    currentPlan.exercises[exercise.id].currentWeightData = actual;
+    currentPlan.exercises[exercise.id].recommendedNextWeightData = null;
+    currentPlan.exercises[exercise.id].progressionState = "user-confirmed";
+    currentPlan.exercises[exercise.id].nextStepText = "Оценить подтверждённый рабочий вес на следующей тренировке.";
+    delete saved.weightData[exercise.id];
+    delete saved.workingWeights[exercise.id];
+  });
+  persistCurrentPlan();
+  persist();
+}
+
+function sessionEffortFor(day) {
+  const entries = day.exercises.map((exercise) => {
+    const strength = strengthForExercise(exercise);
+    return {
+      exerciseId: exercise.id,
+      effortRating: Number(saved.effortRatings?.[exercise.id]) || null,
+      completedWorkingSets: strength.setResults.filter((item) => Number(item.reps) > 0).length,
+      rir: strength.rir,
+      techniqueStatus: strength.techniqueStatus,
+      done: Boolean(saved.exercises?.[exercise.id]),
+    };
+  }).filter((entry) => entry.done || entry.completedWorkingSets > 0);
+  return { entries, summary: calculateSessionEffort(entries) };
+}
+
+function saveSessionEffort(dayId, calculated, final) {
+  const finalValue = Number(final);
+  if (!Number.isInteger(finalValue) || finalValue < 1 || finalValue > 10 || calculated === null) return;
+  saved.sessionEffort[dayId] = {
+    sessionEffortCalculated: calculated,
+    sessionEffortFinal: finalValue,
+    updatedAt: new Date().toISOString(),
+  };
+  persist();
+}
+
+function sessionEffortMarkup(day) {
+  if (!day.exercises.length) return "";
+  const { entries, summary } = sessionEffortFor(day);
+  const stored = saved.sessionEffort?.[day.id] || {};
+  const selected = stored.sessionEffortFinal || summary.recommended;
+  const goodTechnique = entries.filter((entry) => entry.techniqueStatus === "good").length;
+  const rirs = entries.map((entry) => rirOptions[entry.rir]).filter(Boolean);
+  const approximate = summary.ratedExercises < summary.totalExercises;
+  return `
+    <section class="session-effort-card" id="sessionEffortCard">
+      <p class="eyebrow">ИТОГОВОЕ УСИЛИЕ</p>
+      <h3>${day.day}${saved.days[day.id] ? " завершена ✓" : " · предварительно"}</h3>
+      <div class="session-effort-stats">
+        <span>${entries.length} ${plural(entries.length, "упражнение", "упражнения", "упражнений")}</span>
+        <span>${summary.completedWorkingSets} рабочих подходов</span>
+        <span>Техника: ${goodTechnique} из ${entries.length} — хорошая</span>
+        ${rirs.length ? `<span>RIR: ${escapeHtml(rirs.join(", "))}</span>` : ""}
+      </div>
+      ${summary.exact === null ? `<p>Заполните Effort и повторы хотя бы для одного выполненного упражнения.</p>` : `
+        <p>По упражнениям: <strong>${formatNumber(summary.exact)}</strong></p>
+        <p>Рекомендация для Apple Watch: <strong>${summary.recommended} — ${effortCategory(summary.recommended)}</strong></p>
+        <small>${approximate ? `Оценено ${summary.ratedExercises} из ${summary.totalExercises} упражнений. Итог пока приблизительный.` : "Расчёт по вашим оценкам упражнений."}</small>
+        <div class="session-effort-scale" role="group" aria-label="Итоговое усилие тренировки">
+          ${effortLevels.map((level) => `<button type="button" data-session-effort="${level.value}" class="${Number(selected) === level.value ? "is-selected" : ""}" aria-pressed="${Number(selected) === level.value}">${level.score}</button>`).join("")}
+        </div>
+        <p class="session-effort-selected" data-session-effort-label>${selected ? `${selected} — ${effortCategory(selected)}` : "Выберите итоговую оценку"}</p>
+        <button type="button" class="session-effort-save" data-save-session-effort>Сохранить итоговую оценку</button>
+      `}
+    </section>
+  `;
 }
 
 function workingWeightFor(exerciseId) {
@@ -1587,12 +1659,11 @@ function workingWeightFor(exerciseId) {
 }
 
 function weightDataForExercise(exerciseId) {
-  const persistent = resultForExercise(exerciseId);
-  const fallback = saved.workingWeights?.[exerciseId]
-    || persistent.workingWeight
+  const planWeight = currentPlan.exercises?.[exerciseId]?.currentWeightData;
+  const fallback = saved.workingWeights?.[exerciseId] || formatWeightData(planWeight)
     || weightText(exerciseById(exerciseId)?.weight);
   return saved.weightData?.[exerciseId]
-    || persistent.workingWeightData
+    || planWeight
     || normalizeWeightData(fallback);
 }
 
@@ -1629,6 +1700,7 @@ function strengthRecommendation(exerciseId, feedback) {
     .filter((entry) => entry.rir)
     .sort((a, b) => new Date(b.date) - new Date(a.date));
   const eligibleRir = ["2", "3", "3plus"].includes(strength.rir);
+  const effortRating = Number(saved.effortRatings?.[exerciseId] || 0);
   const eligibleTwice = eligibleRir
     && currentHistory.length >= 2
     && currentHistory.slice(0, 2).every((entry) => (
@@ -1649,6 +1721,7 @@ function strengthRecommendation(exerciseId, feedback) {
     if (feedback === "hard") return "Для четверга тяжело — упростить, снизить вес или сократить объём.";
   }
   if (strength.rir === "0" || missedMinimum) return "Снизить нагрузку или проверить технику. Вес не повышать.";
+  if (effortRating >= 9) return "Усилие 9–10: вес не повышать, сначала восстановиться и закрепить технику.";
   if (strength.rir === "1" || feedback === "normal-hard") return "Оставить текущую нагрузку и закрепить верхнюю границу повторений.";
   if (hitUpper && eligibleTwice) return "Можно попробовать следующую ступень веса. Первый подход выполнить как пробный. Если техника ухудшается или не получается нижняя граница повторений, вернуть предыдущий вес.";
   if (hitUpper && eligibleRir) return "Верх повторов выполнен с запасом. Повторить результат ещё на одной тренировке перед повышением веса.";
@@ -1677,6 +1750,7 @@ function saveExerciseResult(exerciseId, feedback) {
     rir: strength.rir,
     techniqueStatus: strength.techniqueStatus,
     feedback: resolvedFeedback,
+    effortRating: Number(saved.effortRatings?.[exerciseId]) || null,
     weightData: weightDataForExercise(exerciseId),
   };
   if (existing) Object.assign(existing, entry);
@@ -1704,8 +1778,6 @@ function setExerciseWeight(exerciseId, value) {
   saved.weightData[exerciseId] = weightData;
   saved.workingWeights[exerciseId] = normalizedWeight;
   const result = resultForExercise(exerciseId);
-  result.workingWeight = normalizedWeight;
-  result.workingWeightData = weightData;
   const currentEntry = result.history.find((entry) => entry.weekKey === currentWeek.key);
   if (currentEntry) {
     currentEntry.weight = normalizedWeight;
@@ -1847,24 +1919,35 @@ function setExerciseFeedback(exerciseId, value, anchor = null) {
   restoreViewport(anchor, anchorTop, scrollX, scrollY, focusedElement);
 }
 
+function setExerciseEffortRating(exerciseId, value, anchor = null) {
+  const rating = Number(value);
+  if (!Number.isInteger(rating) || rating < 1 || rating > 10) return;
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  const anchorTop = anchor?.getBoundingClientRect().top;
+  const focusedElement = document.activeElement;
+  saved.effortRatings[exerciseId] = rating;
+  if (!saved.workingWeights[exerciseId]) saved.workingWeights[exerciseId] = workingWeightFor(exerciseId);
+  saveExerciseResult(exerciseId, saved.feedback?.[exerciseId] || "");
+  persist();
+  restoreViewport(anchor, anchorTop, scrollX, scrollY, focusedElement);
+}
+
 function effortTargetText(exerciseId) {
-  const day = dayForExercise(exerciseId);
-  if (isLightCoreDay(day)) return "Цель лёгкой тренировки: Норма или ближе к легко";
-  if (["mon", "wed", "sat"].includes(day?.id)) return "Цель силовой: Норма ближе к тяжело";
-  return "Оцени ощущение после выполнения";
+  return "Effort — ощущение от упражнения целиком; RIR отмечается отдельно";
 }
 
 function effortDetailMarkup(value) {
   const level = effortLevelFor(value);
   if (!level) {
     return `
-      <strong>Выбери уровень 1-5</strong>
-      <span>Оцени упражнение после выполнения, чтобы сохранить ощущение нагрузки.</span>
+      <strong>Выбери усилие 1–10</strong>
+      <span>1–3 легко · 4–6 умеренно · 7–8 тяжело · 9–10 на пределе.</span>
     `;
   }
   return `
     <strong>${level.score} · ${escapeHtml(level.label)}</strong>
-    <span>${escapeHtml(level.hint)}</span>
+    <span>Субъективное усилие упражнения в целом.</span>
   `;
 }
 
@@ -2130,6 +2213,8 @@ function renderDayDetails() {
 
     <div class="training-flow"></div>
 
+    ${sessionEffortMarkup(day)}
+
     <section class="fatigue-card" id="fatigueCard">
       <div>
         <p class="eyebrow">После тренировки</p>
@@ -2171,6 +2256,27 @@ function renderDayDetails() {
         item.setAttribute("aria-pressed", String(selected));
       });
     });
+  });
+
+  let selectedSessionEffort = Number(saved.sessionEffort?.[day.id]?.sessionEffortFinal || sessionEffortFor(day).summary.recommended || 0);
+  els.dayDetails.querySelectorAll("[data-session-effort]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      selectedSessionEffort = Number(button.dataset.sessionEffort);
+      els.dayDetails.querySelectorAll("[data-session-effort]").forEach((item) => {
+        const selected = Number(item.dataset.sessionEffort) === selectedSessionEffort;
+        item.classList.toggle("is-selected", selected);
+        item.setAttribute("aria-pressed", String(selected));
+      });
+      const label = els.dayDetails.querySelector("[data-session-effort-label]");
+      if (label) label.textContent = `${selectedSessionEffort} — ${effortCategory(selectedSessionEffort)}`;
+    });
+  });
+  els.dayDetails.querySelector("[data-save-session-effort]")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const calculated = sessionEffortFor(day).summary.exact;
+    saveSessionEffort(day.id, calculated, selectedSessionEffort);
+    event.currentTarget.textContent = "Итоговая оценка сохранена ✓";
   });
 
   const flow = els.dayDetails.querySelector(".training-flow");
@@ -2230,7 +2336,11 @@ function renderMainSection(day, exercises) {
     return section;
   }
 
-  exercises.forEach((item, index) => grid.append(renderExercise(item, index + 1)));
+  const defaultIds = day.exercises.map((item) => item.id);
+  const storedOrder = saved.sessionOrder?.[day.id] || defaultIds;
+  const order = [...storedOrder.filter((id) => defaultIds.includes(id)), ...defaultIds.filter((id) => !storedOrder.includes(id))];
+  const orderedExercises = [...exercises].sort((left, right) => order.indexOf(left.id) - order.indexOf(right.id));
+  orderedExercises.forEach((item, index) => grid.append(renderExercise(item, index + 1, day.id)));
   return section;
 }
 
@@ -2377,7 +2487,7 @@ function renderPoolSession(section) {
   return node;
 }
 
-function renderExercise(item, order) {
+function renderExercise(item, order, dayId) {
   const template = document.querySelector("#exerciseTemplate");
   const node = template.content.firstElementChild.cloneNode(true);
   node.dataset.exerciseId = item.id;
@@ -2398,7 +2508,7 @@ function renderExercise(item, order) {
   applyExerciseState(Boolean(saved.exercises[item.id]));
   const feedbackTitle = node.querySelector(".feedback-title");
   feedbackTitle.innerHTML = `
-    <span>Как прошло?</span>
+    <span>Насколько тяжело было это упражнение?</span>
     <small>${escapeHtml(effortTargetText(item.id))}</small>
   `;
   node.addEventListener("click", (event) => {
@@ -2431,13 +2541,14 @@ function renderExercise(item, order) {
     const recommendationFeedback = currentFeedback || previous?.feedback || "";
     const history = [...(result.history || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
     const weightData = weightDataForExercise(item.id);
+    const planEntry = currentPlan.exercises?.[item.id];
     const setInputs = Array.from({ length: strength.targetSets }, (_, index) => strength.setResults[index]?.reps ?? "");
     const legacyPerformance = !strength.setResults.length && strength.actualSets && strength.actualReps
       ? `${strength.actualSets} подхода × ${strength.actualReps} повторений (старый формат)`
       : "";
     resultPanel.innerHTML = `
       <div class="working-weight">
-        <span>Рабочий вес</span>
+        <span>СЕГОДНЯ · фактический вес <button type="button" class="weight-edit" data-weight-edit aria-label="Изменить вес">✎</button></span>
         ${weightData.unit === "bodyweight" ? `<strong>Без веса</strong>` : `
           <label class="number-with-unit">
             <input
@@ -2474,7 +2585,7 @@ function renderExercise(item, order) {
           </select>
         </label>
         <label>
-          <span>Техника / самочувствие</span>
+          <span>Техника / ощущения</span>
           <select data-strength-field="techniqueStatus">
             <option value="">Не отмечено</option>
             ${Object.entries(techniqueOptions).map(([value, label]) => `<option value="${value}" ${strength.techniqueStatus === value ? "selected" : ""}>${label}</option>`).join("")}
@@ -2482,15 +2593,21 @@ function renderExercise(item, order) {
         </label>
       </div>
       <p class="previous-result">
-        <strong>Прошлый результат:</strong>
+        <strong>ПРОШЛАЯ ТРЕНИРОВКА:</strong>
         ${
           previous
-            ? `${escapeHtml(previous.weight)} · ${escapeHtml(performanceText(previous) || "повторы не указаны")} · RIR ${escapeHtml(rirOptions[previous.rir] || "—")} · ${escapeHtml(effortReportLabels[previous.feedback] || "не отмечено")}`
+            ? `${escapeHtml(previous.weight)} · ${escapeHtml(performanceText(previous) || "повторы не указаны")} · RIR ${escapeHtml(rirOptions[previous.rir] || "—")} · Техника: ${escapeHtml(techniqueOptions[previous.techniqueStatus] || "—")}${previous.effortRating ? ` · Усилие ${previous.effortRating}/10` : previous.feedback ? ` · Нагрузка: ${escapeHtml(effortReportLabels[previous.feedback])}` : ""}`
             : "пока нет данных"
         }
       </p>
-      <p class="exercise-recommendation">${escapeHtml(strengthRecommendation(item.id, recommendationFeedback))}</p>
-      ${exerciseProgressionGuidance[item.id] ? `<p class="exercise-guidance"><strong>Ближайшая подсказка:</strong> ${escapeHtml(exerciseProgressionGuidance[item.id])}</p>` : ""}
+      <div class="exercise-recommendation">
+        <strong>СЛЕДУЮЩИЙ ШАГ</strong>
+        <p>${escapeHtml(planEntry?.nextStepText || strengthRecommendation(item.id, recommendationFeedback))}</p>
+        ${planEntry?.recommendedNextWeightData ? `<p>Предложение: <strong>${escapeHtml(formatWeightData(planEntry.recommendedNextWeightData))}</strong> на следующую тренировку.</p>` : ""}
+        ${planEntry?.recommendedNextWeightData ? `<button type="button" data-accept-recommendation>Принять ${escapeHtml(formatWeightData(planEntry.recommendedNextWeightData))} как новый план</button>` : ""}
+        <button type="button" class="is-secondary" data-set-recommendation>Задать вес следующего шага</button>
+      </div>
+      ${planEntry?.techniqueNote ? `<p class="exercise-guidance"><strong>Техника:</strong> ${escapeHtml(planEntry.techniqueNote)}</p>` : ""}
       <details class="exercise-history">
         <summary>История упражнения (${history.length})</summary>
         ${
@@ -2500,7 +2617,7 @@ function renderExercise(item, order) {
                   <time datetime="${escapeHtml(entry.date)}">${new Date(entry.date).toLocaleDateString("ru-RU")}</time>
                   <span>${escapeHtml(entry.weight)}</span>
                   <span>${escapeHtml(performanceText(entry) || "—")}</span>
-                  <strong>RIR ${escapeHtml(rirOptions[entry.rir] || "—")} · ${escapeHtml(effortReportLabels[entry.feedback] || "не отмечено")}${entry.techniqueStatus ? ` · ${escapeHtml(techniqueOptions[entry.techniqueStatus] || entry.techniqueStatus)}` : ""}</strong>
+                  <strong>RIR ${escapeHtml(rirOptions[entry.rir] || "—")} · ${entry.effortRating ? `Усилие ${entry.effortRating}/10` : `Нагрузка: ${escapeHtml(effortReportLabels[entry.feedback] || "не отмечено")}`}${entry.techniqueStatus ? ` · ${escapeHtml(techniqueOptions[entry.techniqueStatus] || entry.techniqueStatus)}` : ""}</strong>
                 </li>
               `).join("")}</ul>`
             : `<p>История появится после первой оценки нагрузки.</p>`
@@ -2508,6 +2625,11 @@ function renderExercise(item, order) {
       </details>
     `;
     const weightInput = resultPanel.querySelector("[data-weight-value]");
+    resultPanel.querySelector("[data-weight-edit]")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      weightInput?.focus();
+      weightInput?.select();
+    });
     weightInput?.addEventListener("click", (event) => event.stopPropagation());
     weightInput?.addEventListener("keydown", (event) => event.stopPropagation());
     weightInput?.addEventListener("change", (event) => {
@@ -2536,12 +2658,40 @@ function renderExercise(item, order) {
     });
     resultPanel.querySelector("details").addEventListener("click", (event) => event.stopPropagation());
     resultPanel.querySelector("details").addEventListener("keydown", (event) => event.stopPropagation());
+    resultPanel.querySelector("[data-accept-recommendation]")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (!acceptRecommendation(currentPlan, item.id)) return;
+      delete saved.weightData[item.id];
+      delete saved.workingWeights[item.id];
+      persistCurrentPlan();
+      persist();
+      renderResultPanel();
+    });
+    resultPanel.querySelector("[data-set-recommendation]")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const raw = window.prompt("Вес для следующей тренировки, кг", "");
+      if (raw === null) return;
+      const value = parseLocaleNumber(raw);
+      if (value === null || value <= 0 || !planEntry) return;
+      planEntry.recommendedNextWeightData = {
+        ...planEntry.currentWeightData,
+        value,
+        unit: "kg",
+        raw: "",
+        needsReview: false,
+        reviewReason: "",
+        verified: true,
+      };
+      planEntry.nextStepText = "Потенциальное изменение сохранено для следующей тренировки. Текущий вес сегодня не изменён.";
+      persistCurrentPlan();
+      renderResultPanel();
+    });
   };
   renderResultPanel();
 
   const renderFeedbackSelection = (value) => {
     feedbackButtons.querySelectorAll("[data-effort]").forEach((option) => {
-      const selected = option.dataset.effort === value;
+      const selected = option.dataset.effort === String(value || "");
       option.classList.toggle("is-selected", selected);
       option.setAttribute("aria-pressed", String(selected));
     });
@@ -2561,11 +2711,11 @@ function renderExercise(item, order) {
       ${level.score}
     </button>
   `).join("");
-  renderFeedbackSelection(saved.feedback?.[item.id] || "");
+  renderFeedbackSelection(saved.effortRatings?.[item.id] || "");
   feedbackButtons.querySelectorAll("[data-effort]").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      setExerciseFeedback(item.id, button.dataset.effort, node);
+      setExerciseEffortRating(item.id, button.dataset.effort, node);
       renderFeedbackSelection(button.dataset.effort);
       renderResultPanel();
     });
@@ -2589,10 +2739,28 @@ function renderExercise(item, order) {
   }
 
   node.querySelector("h3").textContent = `${order}. ${item.title}`;
+  const orderControls = document.createElement("div");
+  orderControls.className = "session-order-controls";
+  orderControls.innerHTML = `<span>Порядок сегодня</span><button type="button" data-order-move="up" aria-label="Переместить выше">↑</button><button type="button" data-order-move="down" aria-label="Переместить ниже">↓</button>`;
+  node.querySelector("h3").after(orderControls);
+  orderControls.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const button = event.target.closest("[data-order-move]");
+    if (!button) return;
+    const defaults = (workouts.find((day) => day.id === dayId)?.exercises || []).map((exercise) => exercise.id);
+    const ids = [...(saved.sessionOrder?.[dayId] || defaults)];
+    const index = ids.indexOf(item.id);
+    const nextIndex = button.dataset.orderMove === "up" ? index - 1 : index + 1;
+    if (index < 0 || nextIndex < 0 || nextIndex >= ids.length) return;
+    [ids[index], ids[nextIndex]] = [ids[nextIndex], ids[index]];
+    saved.sessionOrder[dayId] = ids;
+    persist();
+    renderDayDetails();
+  });
   node.querySelector(".summary").textContent = item.summary;
+  const planEntry = currentPlan.exercises?.[item.id];
   node.querySelector(".metrics").innerHTML = [
-    ["Подходы/повторы", item.sets],
-    ["Вес", item.weight],
+    ["СЕГОДНЯ", planEntry ? `${formatWeightData(weightDataForExercise(item.id))} · ${planEntry.targetSets} × ${planEntry.targetReps}` : item.sets],
     ["RPE/RIR", item.rpe],
     ["Отдых", item.rest],
   ].map(([key, value]) => `
@@ -2601,7 +2769,7 @@ function renderExercise(item, order) {
         ${key}
         <button class="tooltip" type="button" aria-label="${metricHelp[key]}" data-tip-title="${key}" data-tip="${metricHelp[key]}">?</button>
       </dt>
-      <dd class="${key === "Вес" && typeof value === "object" ? "metric-weight" : ""}">${metricValue(value)}</dd>
+      <dd class="${key === "СЕГОДНЯ" ? "metric-today" : ""}">${metricValue(value)}</dd>
     </div>
   `).join("");
   node.querySelector(".muscles").innerHTML = `<strong>Мышцы:</strong> ${item.muscles}`;
@@ -2686,7 +2854,7 @@ function renderBodyTracker() {
       <p class="eyebrow">Текущая цель · 6-8 недель</p>
       <h3>Рекомпозиция тела</h3>
       <ul>
-        <li>Удерживать средний вес в диапазоне 76-77 кг.</li>
+        <li>Удерживать средний вес в диапазоне ${currentPlan.currentGoal.weightMinKg}-${currentPlan.currentGoal.weightMaxKg} кг.</li>
         <li>Постепенно увеличивать силовые показатели без заметного роста талии.</li>
         <li>Ориентир по белку: 120-140 г в сутки.</li>
       </ul>
@@ -2727,11 +2895,12 @@ function renderBodyTracker() {
     <form class="tracker-form body-form">
       <label><span>Дата</span><input name="date" type="date" value="${new Date().toISOString().slice(0, 10)}" /></label>
       ${bodyMetricFields.map(([key, label, unit]) => `
-        <label>
+        <label class="${key === "waistCm" ? "waist-field" : ""}">
           <span>${label}${unit ? `, ${unit}` : ""}</span>
           <input name="${key}" type="text" inputmode="decimal" pattern="^-?\\d*[.,]?\\d*$" value="${escapeHtml(latest[key] ?? "")}" />
         </label>
       `).join("")}
+      <p class="waist-reminder is-wide">Добавьте обхват талии — он помогает оценивать прогресс лучше, чем одиночное значение % жира. Поле необязательное.</p>
       <label><span>Общее восстановление</span><select name="recovery">${Object.entries(recoveryOptions).map(([value, label]) => `<option value="${value}" ${latest.recovery === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
       <label class="is-wide"><span>Комментарий</span><textarea name="comments" placeholder="Сон, питание, тренировки, самочувствие">${escapeHtml(latest.comments || latest.notes || "")}</textarea></label>
       <p class="form-error is-wide" data-body-error role="alert"></p>

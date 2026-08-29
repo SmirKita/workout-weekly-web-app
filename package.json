@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "verify:plan": "node scripts/verify-current-plan.mjs",
+    "verify:backup": "node scripts/verify-backup.mjs",
+    "verify:roundtrip": "node scripts/verify-import-roundtrip.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4"

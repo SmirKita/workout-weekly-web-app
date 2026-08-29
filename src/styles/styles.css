@@ -2289,9 +2289,9 @@ p {
 
 .feedback-buttons {
   display: grid;
-  grid-template-columns: repeat(5, minmax(42px, 52px));
+  grid-template-columns: repeat(5, minmax(44px, 1fr));
   gap: 7px;
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
 }
 
@@ -2315,7 +2315,7 @@ p {
 .effort-button {
   display: inline-grid;
   place-items: center;
-  min-height: 42px;
+  min-height: 48px;
   border-color: #d8e0da;
   border-radius: 999px;
   background: #fff;
@@ -2326,9 +2326,103 @@ p {
   transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, color 160ms ease;
 }
 
+.metric-today {
+  color: var(--ink);
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 950;
+}
+
+.weight-edit {
+  min-width: 38px;
+  min-height: 38px;
+  margin-left: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+}
+
+.working-weight .number-with-unit input {
+  min-height: 58px;
+  font-size: 26px;
+}
+
+.exercise-recommendation {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: #eef7f1;
+}
+
+.exercise-recommendation p { margin: 4px 0 0; }
+
+.session-order-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.session-order-controls button,
+.session-effort-scale button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.session-effort-card {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfcfa;
+}
+
+.session-effort-stats,
+.session-effort-scale {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.session-effort-stats span {
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: #eef3ef;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.session-effort-scale { margin: 14px 0 8px; }
+.session-effort-scale button.is-selected { background: var(--ink); color: #fff; transform: scale(1.08); }
+.session-effort-selected { font-size: 22px; font-weight: 950; }
+.session-effort-save { min-height: 48px; }
+
+.waist-field {
+  padding: 10px;
+  border: 2px solid rgba(47, 125, 92, 0.45);
+  border-radius: var(--radius);
+  background: #f1f8f3;
+}
+
+.waist-reminder { margin: 0; color: #315242; font-weight: 800; }
+
 .effort-button:hover {
   background: #f5f7f3;
   border-color: #c7d2ca;
+}
+
+.effort-button.is-selected {
+  border-color: transparent;
+  background: linear-gradient(135deg, #2e9b5f, #d4a72c 58%, #bb4949);
+  color: #fff;
+  box-shadow: 0 8px 18px rgb(49 83 67 / 22%);
+  transform: scale(1.08);
 }
 
 .fatigue-button {
