@@ -2380,28 +2380,98 @@ p {
   padding: 18px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: #fbfcfa;
+  background: linear-gradient(145deg, #fbfcfa, #f1f8f3);
+  text-align: center;
 }
 
-.session-effort-stats,
-.session-effort-scale {
-  display: flex;
-  flex-wrap: wrap;
+.session-effort-card h3 {
+  margin: 2px 0 16px;
+  font-size: 24px;
+}
+
+.session-effort-result {
+  display: grid;
+  justify-items: center;
+  gap: 0;
+}
+
+.session-effort-number {
+  font-size: clamp(70px, 18vw, 104px);
+  line-height: 0.92;
+  letter-spacing: -0.06em;
+}
+
+.session-effort-category {
+  margin-top: 8px;
+  font-size: 24px;
+  font-weight: 950;
+}
+
+.session-effort-track {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 4px;
+  max-width: 520px;
+  margin: 20px auto 14px;
+}
+
+.session-effort-track span {
+  min-height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: #e3e9e4;
+  color: #68756d;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.session-effort-track span.is-filled {
+  background: linear-gradient(135deg, #2e9b5f, #d4a72c);
+  color: #fff;
+}
+
+.session-effort-track span.is-current {
+  outline: 3px solid rgba(36, 55, 47, 0.25);
+  transform: translateY(-3px);
+}
+
+.session-effort-average,
+.session-effort-watch { font-size: 17px; }
+.session-effort-watch { margin-bottom: 0; }
+.session-effort-preliminary { display: block; color: #9a6418; font-weight: 900; }
+
+.session-effort-empty {
+  display: grid;
   gap: 8px;
+  padding: 22px;
+  border-radius: var(--radius);
+  background: #fff;
 }
 
-.session-effort-stats span {
-  padding: 6px 9px;
-  border-radius: 999px;
-  background: #eef3ef;
-  font-size: 13px;
-  font-weight: 800;
+.session-effort-empty strong { font-size: 21px; }
+.session-effort-empty span { color: var(--muted); }
+
+.history-session-efforts {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
 }
 
-.session-effort-scale { margin: 14px 0 8px; }
-.session-effort-scale button.is-selected { background: var(--ink); color: #fff; transform: scale(1.08); }
-.session-effort-selected { font-size: 22px; font-weight: 950; }
-.session-effort-save { min-height: 48px; }
+.history-session-efforts > div {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 5px 10px;
+  align-items: baseline;
+  padding: 9px 10px;
+  border-radius: var(--radius);
+  background: #f1f8f3;
+  text-align: left;
+}
+
+.history-session-efforts strong { justify-self: end; }
+.history-session-efforts small { grid-column: 1 / -1; color: var(--muted); }
 
 .waist-field {
   padding: 10px;

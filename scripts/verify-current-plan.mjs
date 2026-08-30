@@ -51,8 +51,8 @@ const effort = calculateSessionEffort([
   { effortRating: 6, completedWorkingSets: 3 },
   { effortRating: 4, completedWorkingSets: 2 },
 ]);
-assert.equal(effort.exact, 5.9);
-assert.equal(effort.recommended, 6);
+assert.equal(effort.exact, 5.88);
+assert.equal(effort.rounded, 6);
 
 console.table(rows);
 if (errors.length) throw new Error(`Ошибки currentPlan:\n${errors.join("\n")}`);

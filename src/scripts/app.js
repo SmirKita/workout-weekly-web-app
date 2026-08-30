@@ -105,24 +105,12 @@ function effortLevelFor(value) {
   return effortLevels.find((level) => level.value === Number(value)) || null;
 }
 
-const fatigueOptions = {
-  light: "Лёгкая",
-  normal: "Норм",
-  strong: "Сильная",
-};
-
 const effortReportLabels = {
   easy: "легко",
   "normal-light": "норма ближе к легко",
   normal: "норма",
   "normal-hard": "норма ближе к тяжело",
   hard: "тяжело",
-};
-
-const fatigueReportLabels = {
-  light: "лёгкая",
-  normal: "нормальная",
-  strong: "сильная",
 };
 
 const backupWorkout2Results = {
@@ -887,14 +875,6 @@ function feedbackStatsForSaved(source) {
   return { counts, easy, normalLight, normalHard, hard };
 }
 
-function fatigueStatsForSaved(source) {
-  const counts = { light: 0, normal: 0, strong: 0 };
-  Object.values(source.fatigue || {}).forEach((value) => {
-    if (counts.hasOwnProperty(value)) counts[value] += 1;
-  });
-  return counts;
-}
-
 function weightText(weight) {
   if (!weight || typeof weight !== "object") return weight || "не указан";
   return weight.start || "уточнить";
@@ -1010,7 +990,6 @@ function reportModel(weekKey) {
     hard: entries.filter((entry) => entry.feedback === "hard"),
     unrated: entries.filter((entry) => !entry.feedback),
   };
-  const fatigue = fatigueStatsForSaved(source);
   const hasData = hasStoredProgress(source);
 
   return {
@@ -1019,7 +998,6 @@ function reportModel(weekKey) {
     stats,
     entries,
     grouped,
-    fatigue,
     hasData,
     progressPercent: percent(stats.done, stats.total),
   };
@@ -1078,6 +1056,39 @@ function hasStoredProgress(source) {
   );
 }
 
+function normalizedStoredSessionEffort(value) {
+  if (!value || typeof value !== "object") return null;
+  // Итоги прежней версии могли содержать ручной sessionEffortFinal без данных
+  // о выполненных упражнениях. Не выдаём их за новый автоматический расчёт.
+  if (!("completedExercises" in value)) return null;
+  const exact = parseLocaleNumber(value.exact ?? value.sessionEffortCalculatedExact ?? value.sessionEffortCalculated);
+  if (exact === null) return null;
+  return {
+    exact,
+    rounded: Number(value.rounded ?? Math.round(exact)),
+    ratedExercises: Number(value.ratedExercises || 0),
+    completedExercises: Number(value.completedExercises || value.totalExercises || 0),
+    completedSets: Number(value.completedSets || value.completedWorkingSets || 0),
+    complete: Boolean(value.complete),
+    updatedAt: value.updatedAt || "",
+  };
+}
+
+function sessionEffortHistoryMarkup(source) {
+  const entries = workouts
+    .map((day) => ({ day, effort: normalizedStoredSessionEffort(source.sessionEffort?.[day.id]) }))
+    .filter((entry) => entry.effort);
+  if (!entries.length) return "";
+  return `<div class="history-session-efforts">${entries.map(({ day, effort }) => `
+    <div>
+      <time>${effort.updatedAt ? new Date(effort.updatedAt).toLocaleDateString("ru-RU", { day: "numeric", month: "long" }) : day.day}</time>
+      <span>${day.day}</span>
+      <strong>${effort.rounded} — ${effortCategory(effort.rounded)}</strong>
+      <small>Среднее: ${formatNumber(Math.round(effort.exact * 10) / 10)} · ${effort.completedExercises} упр. · ${effort.completedSets} подх.</small>
+    </div>
+  `).join("")}</div>`;
+}
+
 function renderHistory() {
   if (!els.historyList) return;
 
@@ -1115,6 +1126,7 @@ function renderHistory() {
           <strong>${row.totalPercent}%</strong>
         </div>
         <div class="progress-bar" aria-hidden="true"><span style="width: ${row.totalPercent}%"></span></div>
+        ${sessionEffortHistoryMarkup(row.week.key === currentWeek.key ? saved : loadJson(`workout-progress-${row.week.key}`, emptyProgress()))}
       </article>
     `)
     .join("");
@@ -1287,7 +1299,8 @@ function weeklyReportText(model) {
     const dayEntries = day.exercises;
     if (!dayEntries.length) return;
     lines.push("", `${day.day} — ${day.title}`, `Статус: ${dayStatus(day, model.source)}`);
-    lines.push(`Общая усталость: ${fatigueReportLabels[model.source.fatigue?.[day.id]] || "не отмечено"}`);
+    const sessionEffort = normalizedStoredSessionEffort(model.source.sessionEffort?.[day.id]);
+    lines.push(`Итоговое усилие: ${sessionEffort ? `${sessionEffort.rounded} — ${effortCategory(sessionEffort.rounded)} (среднее ${formatNumber(Math.round(sessionEffort.exact * 10) / 10)})` : "недостаточно данных"}`);
     lines.push("", "Основная часть:");
     dayEntries.forEach((exercise) => {
       const entry = model.entries.find((item) => item.exercise.id === exercise.id);
@@ -1336,7 +1349,6 @@ function renderLoadSummary() {
   if (!els.loadSummary) return;
   const wasOpen = els.loadSummary.querySelector("details")?.open;
   const feedback = feedbackStatsForSaved(saved);
-  const fatigue = fatigueStatsForSaved(saved);
   const repeatedEasy = repeatedFeedback("easy");
   const repeatedNormalLight = repeatedFeedback("normal-light");
   const repeatedHard = repeatedFeedback("hard");
@@ -1356,11 +1368,6 @@ function renderLoadSummary() {
           <span class="is-normal">Норма: <strong>${feedback.counts.normal}</strong></span>
           <span class="is-normal-hard">Норма ближе к тяжело: <strong>${feedback.counts["normal-hard"]}</strong></span>
           <span class="is-hard">Тяжело: <strong>${feedback.counts.hard}</strong></span>
-        </div>
-        <div class="load-summary__stats">
-          <span>Усталость лёгкая: <strong>${fatigue.light}</strong></span>
-          <span>нормальная: <strong>${fatigue.normal}</strong></span>
-          <span>сильная: <strong>${fatigue.strong}</strong></span>
         </div>
         <div class="load-summary__grid">
           <article>
@@ -1563,8 +1570,11 @@ function setCompletion(key, done, anchor = null) {
   const focusedElement = document.activeElement;
   saved.exercises[key] = done;
   syncAllDayCompletion();
+  const effortDay = dayForExercise(key);
+  if (effortDay) storeSessionEffort(effortDay);
   persist();
   updateProgressViews();
+  if (effortDay) refreshSessionEffortView(effortDay);
   restoreViewport(anchor, anchorTop, scrollX, scrollY, focusedElement);
 }
 
@@ -1573,6 +1583,7 @@ function setDayCompletion(day, done) {
     saved.exercises[item.key] = done;
   });
   syncDayCompletion(day);
+  storeSessionEffort(day);
   persist();
   if (done) offerActualWeightsAsPlan(day);
   render();
@@ -1599,56 +1610,64 @@ function offerActualWeightsAsPlan(day) {
 function sessionEffortFor(day) {
   const entries = day.exercises.map((exercise) => {
     const strength = strengthForExercise(exercise);
+    const completedWorkingSets = strength.setResults.filter((item) => Number(item.reps) > 0).length;
+    const completionState = saved.exercises?.[exercise.id];
     return {
       exerciseId: exercise.id,
       effortRating: Number(saved.effortRatings?.[exercise.id]) || null,
-      completedWorkingSets: strength.setResults.filter((item) => Number(item.reps) > 0).length,
+      completedWorkingSets,
+      completed: completionState === true || (completionState !== false && completedWorkingSets > 0),
       rir: strength.rir,
       techniqueStatus: strength.techniqueStatus,
-      done: Boolean(saved.exercises?.[exercise.id]),
     };
-  }).filter((entry) => entry.done || entry.completedWorkingSets > 0);
+  }).filter((entry) => entry.completed);
   return { entries, summary: calculateSessionEffort(entries) };
 }
 
-function saveSessionEffort(dayId, calculated, final) {
-  const finalValue = Number(final);
-  if (!Number.isInteger(finalValue) || finalValue < 1 || finalValue > 10 || calculated === null) return;
-  saved.sessionEffort[dayId] = {
-    sessionEffortCalculated: calculated,
-    sessionEffortFinal: finalValue,
+function storeSessionEffort(day) {
+  if (!day?.exercises?.length) return null;
+  const { summary } = sessionEffortFor(day);
+  saved.sessionEffort[day.id] = {
+    ...summary,
+    sessionEffortCalculatedExact: summary.exact,
+    sessionEffortCalculated: summary.rounded,
     updatedAt: new Date().toISOString(),
   };
-  persist();
+  return summary;
+}
+
+function refreshSessionEffortView(day) {
+  const current = els.dayDetails.querySelector("#sessionEffortCard");
+  if (current) current.outerHTML = sessionEffortMarkup(day);
+  renderHistory();
 }
 
 function sessionEffortMarkup(day) {
   if (!day.exercises.length) return "";
-  const { entries, summary } = sessionEffortFor(day);
-  const stored = saved.sessionEffort?.[day.id] || {};
-  const selected = stored.sessionEffortFinal || summary.recommended;
-  const goodTechnique = entries.filter((entry) => entry.techniqueStatus === "good").length;
-  const rirs = entries.map((entry) => rirOptions[entry.rir]).filter(Boolean);
-  const approximate = summary.ratedExercises < summary.totalExercises;
+  const { summary } = sessionEffortFor(day);
+  const averageDisplay = summary.exact === null ? "" : formatNumber(Math.round(summary.exact * 10) / 10);
   return `
     <section class="session-effort-card" id="sessionEffortCard">
-      <p class="eyebrow">ИТОГОВОЕ УСИЛИЕ</p>
-      <h3>${day.day}${saved.days[day.id] ? " завершена ✓" : " · предварительно"}</h3>
-      <div class="session-effort-stats">
-        <span>${entries.length} ${plural(entries.length, "упражнение", "упражнения", "упражнений")}</span>
-        <span>${summary.completedWorkingSets} рабочих подходов</span>
-        <span>Техника: ${goodTechnique} из ${entries.length} — хорошая</span>
-        ${rirs.length ? `<span>RIR: ${escapeHtml(rirs.join(", "))}</span>` : ""}
-      </div>
-      ${summary.exact === null ? `<p>Заполните Effort и повторы хотя бы для одного выполненного упражнения.</p>` : `
-        <p>По упражнениям: <strong>${formatNumber(summary.exact)}</strong></p>
-        <p>Рекомендация для Apple Watch: <strong>${summary.recommended} — ${effortCategory(summary.recommended)}</strong></p>
-        <small>${approximate ? `Оценено ${summary.ratedExercises} из ${summary.totalExercises} упражнений. Итог пока приблизительный.` : "Расчёт по вашим оценкам упражнений."}</small>
-        <div class="session-effort-scale" role="group" aria-label="Итоговое усилие тренировки">
-          ${effortLevels.map((level) => `<button type="button" data-session-effort="${level.value}" class="${Number(selected) === level.value ? "is-selected" : ""}" aria-pressed="${Number(selected) === level.value}">${level.score}</button>`).join("")}
+      <p class="eyebrow">ПОСЛЕ ТРЕНИРОВКИ</p>
+      <h3>Итоговое усилие</h3>
+      ${summary.exact === null ? `
+        <div class="session-effort-empty">
+          <strong>Пока недостаточно данных</strong>
+          <span>Отмечайте Effort после упражнений — итог появится автоматически.</span>
         </div>
-        <p class="session-effort-selected" data-session-effort-label>${selected ? `${selected} — ${effortCategory(selected)}` : "Выберите итоговую оценку"}</p>
-        <button type="button" class="session-effort-save" data-save-session-effort>Сохранить итоговую оценку</button>
+      ` : `
+        <div class="session-effort-result">
+          <strong class="session-effort-number">${summary.rounded}</strong>
+          <span class="session-effort-category">${effortCategory(summary.rounded)}</span>
+        </div>
+        <div class="session-effort-track" aria-label="Итоговое усилие ${summary.rounded} из 10">
+          ${effortLevels.map((level) => `<span class="${level.value <= summary.rounded ? "is-filled" : ""} ${level.value === summary.rounded ? "is-current" : ""}">${level.value}</span>`).join("")}
+        </div>
+        <p class="session-effort-average">Средняя оценка: <strong>${averageDisplay}</strong></p>
+        <p>Оценено ${summary.ratedExercises} из ${summary.completedExercises} выполненных упражнений.</p>
+        <p>Рассчитано по ${summary.completedExercises} ${plural(summary.completedExercises, "упражнению", "упражнениям", "упражнениям")} и ${summary.completedSets} рабочим подходам.</p>
+        ${summary.complete ? "" : `<small class="session-effort-preliminary">Итог предварительный.</small>`}
+        <p class="session-effort-watch">Для Apple Watch: <strong>${summary.rounded} — ${effortCategory(summary.rounded)}</strong></p>
       `}
     </section>
   `;
@@ -1819,7 +1838,10 @@ function setExerciseSetRep(exerciseId, index, value) {
     existing.date = new Date().toISOString();
     persistExerciseResults();
   }
+  const day = dayForExercise(exerciseId);
+  if (day) storeSessionEffort(day);
   persist();
+  if (day) refreshSessionEffortView(day);
 }
 
 function isCardioRoutine(section, item) {
@@ -1929,7 +1951,10 @@ function setExerciseEffortRating(exerciseId, value, anchor = null) {
   saved.effortRatings[exerciseId] = rating;
   if (!saved.workingWeights[exerciseId]) saved.workingWeights[exerciseId] = workingWeightFor(exerciseId);
   saveExerciseResult(exerciseId, saved.feedback?.[exerciseId] || "");
+  const day = dayForExercise(exerciseId);
+  if (day) storeSessionEffort(day);
   persist();
+  if (day) refreshSessionEffortView(day);
   restoreViewport(anchor, anchorTop, scrollX, scrollY, focusedElement);
 }
 
@@ -1949,18 +1974,6 @@ function effortDetailMarkup(value) {
     <strong>${level.score} · ${escapeHtml(level.label)}</strong>
     <span>Субъективное усилие упражнения в целом.</span>
   `;
-}
-
-function setDayFatigue(dayId, value, anchor = null) {
-  const scrollX = window.scrollX;
-  const scrollY = window.scrollY;
-  const anchorTop = anchor?.getBoundingClientRect().top;
-  const focusedElement = document.activeElement;
-  saved.fatigue[dayId] = value;
-  persist();
-  renderLoadSummary();
-  renderWeeklyReport();
-  restoreViewport(anchor, anchorTop, scrollX, scrollY, focusedElement);
 }
 
 function shouldIgnoreToggle(event) {
@@ -2214,26 +2227,6 @@ function renderDayDetails() {
     <div class="training-flow"></div>
 
     ${sessionEffortMarkup(day)}
-
-    <section class="fatigue-card" id="fatigueCard">
-      <div>
-        <p class="eyebrow">После тренировки</p>
-        <h3>Общая усталость</h3>
-        <p>Отметка относится ко всему дню и помогает понять, стоит ли повышать веса.</p>
-      </div>
-      <div class="fatigue-buttons" role="group" aria-label="Общая усталость после тренировки">
-        ${Object.entries(fatigueOptions).map(([value, label]) => `
-          <button
-            class="fatigue-button is-${value} ${saved.fatigue?.[day.id] === value ? "is-selected" : ""}"
-            type="button"
-            data-fatigue="${value}"
-            aria-pressed="${saved.fatigue?.[day.id] === value}"
-          >
-            ${label}
-          </button>
-        `).join("")}
-      </div>
-    </section>
   `;
 
   els.dayDetails.querySelector("#activeDayDone").addEventListener("change", (event) => {
@@ -2245,39 +2238,6 @@ function renderDayDetails() {
     persistNotes();
   });
   els.dayDetails.querySelector("#dayNotes").addEventListener("click", (event) => event.stopPropagation());
-
-  els.dayDetails.querySelectorAll("[data-fatigue]").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      setDayFatigue(day.id, button.dataset.fatigue, els.dayDetails.querySelector("#fatigueCard"));
-      els.dayDetails.querySelectorAll("[data-fatigue]").forEach((item) => {
-        const selected = item.dataset.fatigue === button.dataset.fatigue;
-        item.classList.toggle("is-selected", selected);
-        item.setAttribute("aria-pressed", String(selected));
-      });
-    });
-  });
-
-  let selectedSessionEffort = Number(saved.sessionEffort?.[day.id]?.sessionEffortFinal || sessionEffortFor(day).summary.recommended || 0);
-  els.dayDetails.querySelectorAll("[data-session-effort]").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      selectedSessionEffort = Number(button.dataset.sessionEffort);
-      els.dayDetails.querySelectorAll("[data-session-effort]").forEach((item) => {
-        const selected = Number(item.dataset.sessionEffort) === selectedSessionEffort;
-        item.classList.toggle("is-selected", selected);
-        item.setAttribute("aria-pressed", String(selected));
-      });
-      const label = els.dayDetails.querySelector("[data-session-effort-label]");
-      if (label) label.textContent = `${selectedSessionEffort} — ${effortCategory(selectedSessionEffort)}`;
-    });
-  });
-  els.dayDetails.querySelector("[data-save-session-effort]")?.addEventListener("click", (event) => {
-    event.stopPropagation();
-    const calculated = sessionEffortFor(day).summary.exact;
-    saveSessionEffort(day.id, calculated, selectedSessionEffort);
-    event.currentTarget.textContent = "Итоговая оценка сохранена ✓";
-  });
 
   const flow = els.dayDetails.querySelector(".training-flow");
   preSections.forEach((section) => flow.append(renderRoutineSection(section)));

@@ -160,17 +160,28 @@ export function effortCategory(value) {
 }
 
 export function calculateSessionEffort(entries = []) {
-  const completed = entries.filter((entry) => Number.isInteger(entry.effortRating) && entry.effortRating >= 1 && entry.effortRating <= 10 && entry.completedWorkingSets > 0);
-  const totalSets = completed.reduce((sum, entry) => sum + entry.completedWorkingSets, 0);
-  const exact = totalSets
-    ? completed.reduce((sum, entry) => sum + entry.effortRating * entry.completedWorkingSets, 0) / totalSets
+  const completed = entries.filter((entry) => entry.completed !== false);
+  const rated = completed
+    .filter((entry) => Number.isInteger(entry.effortRating) && entry.effortRating >= 1 && entry.effortRating <= 10)
+    .map((entry) => ({
+      ...entry,
+      calculationSets: Number(entry.completedWorkingSets) > 0 ? Number(entry.completedWorkingSets) : 1,
+    }));
+  const ratedSets = rated.reduce((sum, entry) => sum + entry.calculationSets, 0);
+  const exactRaw = ratedSets
+    ? rated.reduce((sum, entry) => sum + entry.effortRating * entry.calculationSets, 0) / ratedSets
     : null;
+  const exact = exactRaw === null ? null : Math.round(exactRaw * 100) / 100;
   return {
-    exact: exact === null ? null : Math.round(exact * 10) / 10,
-    recommended: exact === null ? null : Math.round(exact),
-    ratedExercises: completed.length,
-    totalExercises: entries.length,
-    completedWorkingSets: entries.reduce((sum, entry) => sum + Math.max(0, Number(entry.completedWorkingSets) || 0), 0),
+    exact,
+    rounded: exact === null ? null : Math.round(exact),
+    ratedExercises: rated.length,
+    completedExercises: completed.length,
+    completedSets: completed.reduce(
+      (sum, entry) => sum + (Number(entry.completedWorkingSets) > 0 ? Number(entry.completedWorkingSets) : 1),
+      0,
+    ),
+    complete: completed.length > 0 && rated.length === completed.length,
   };
 }
 
